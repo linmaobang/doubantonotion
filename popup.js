@@ -193,18 +193,28 @@ async function createDatabase(type) {
     const notionToken = notionTokenInput.value.trim();
     const parentPageUrlOrId = parentPageIdInput.value.trim();
     const parentPageId = extractIdFromUrl(parentPageUrlOrId);
+    const dbIdInput = document.getElementById(`${type}DatabaseId`);
+    const existingDbId = dbIdInput.value.trim();
 
     if (!notionToken || !parentPageId) {
         setStatus('请先填写 Notion Token 和有效的父页面ID或URL', true);
         return;
     }
-    if (!confirm(`确定要在父页面下创建新的 ${type.toUpperCase()} 数据库吗？`)) return;
+
+    let confirmationMessage = `确定要在父页面下创建新的 ${type.toUpperCase()} 数据库吗？`;
+    if (existingDbId) {
+        confirmationMessage = `一个 ${type.toUpperCase()} 数据库ID已经存在。您确定要创建一个新的数据库吗？这将会替换掉输入框中的旧ID。`;
+    }
+
+    if (!confirm(confirmationMessage)) {
+        return;
+    }
 
     setStatus(`正在创建 ${type.toUpperCase()} 数据库...`, false);
     try {
         const schema = SCHEMAS[type];
         const newDb = await sendMessageToBackground('createDatabase', { notionToken, parentPageId, schema });
-        document.getElementById(`${type}DatabaseId`).value = newDb.id;
+        dbIdInput.value = newDb.id;
         await saveSettings();
         setStatus(`${type.toUpperCase()} 数据库创建成功!`, false);
     } catch (error) {
