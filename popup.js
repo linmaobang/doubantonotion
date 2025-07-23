@@ -14,6 +14,7 @@ const SCHEMAS = {
             '出版日期': { rich_text: {} },
             '出版社': { rich_text: {} },
             'ISBN': { rich_text: {} },
+            '出品方': { rich_text: {} },
             '链接': { url: {} },
         }
     },
@@ -28,6 +29,7 @@ const SCHEMAS = {
             '类型': { multi_select: {} },
             '上映日期': { rich_text: {} },
             '国家': { rich_text: {} },
+            '出品方': { rich_text: {} },
             'IMDb': { rich_text: {} },
             '链接': { url: {} },
         }
@@ -43,6 +45,7 @@ const SCHEMAS = {
             '类型': { multi_select: {} },
             '首播日期': { rich_text: {} },
             '国家': { rich_text: {} },
+            '出品方': { rich_text: {} },
             '集数': { number: {} },
             '链接': { url: {} },
         }
