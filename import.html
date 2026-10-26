@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>批量导入 · 豆瓣同步到 Notion</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="options">
+  <main>
+    <h1>批量导入豆瓣标记</h1>
+
+    <div id="resume" class="panel notice" hidden>
+      <p id="resumeText"></p>
+      <div class="row-actions">
+        <button type="button" id="resumeBtn" class="primary">继续导入</button>
+        <button type="button" id="discardBtn" class="secondary">放弃，重新开始</button>
+      </div>
+    </div>
+
+    <!-- 第一步：选择要导入的内容 -->
+    <section id="setup" class="panel">
+      <h2>1. 选择要导入的内容</h2>
+      <label class="field">
+        <span>豆瓣个人主页链接或用户 ID</span>
+        <input type="text" id="uid" placeholder="https://www.douban.com/people/你的ID/">
+      </label>
+      <p class="muted">在豆瓣点头像进入「我的豆瓣」，复制浏览器地址栏里的链接即可。只会导入公开的标记。</p>
+
+      <fieldset class="checks">
+        <legend>📚 图书</legend>
+        <label><input type="checkbox" name="book" value="mark"> 想读</label>
+        <label><input type="checkbox" name="book" value="doing"> 在读</label>
+        <label><input type="checkbox" name="book" value="done" checked> 读过</label>
+      </fieldset>
+      <fieldset class="checks">
+        <legend>🎬 电影和剧集</legend>
+        <label><input type="checkbox" name="movie" value="mark"> 想看</label>
+        <label><input type="checkbox" name="movie" value="doing"> 在看</label>
+        <label><input type="checkbox" name="movie" value="done" checked> 看过</label>
+      </fieldset>
+
+      <fieldset class="checks column">
+        <legend>信息完整度</legend>
+        <label><input type="radio" name="detail" value="full" checked> 完整：逐条打开详情页，补全 ISBN、译者、编剧、IMDb、影视简介等（每条约 4 秒）</label>
+        <label><input type="radio" name="detail" value="fast"> 快速：只用列表里的信息（每条约 1 秒）</label>
+      </fieldset>
+      <fieldset class="checks column">
+        <legend>Notion 里已经有的条目</legend>
+        <label><input type="radio" name="existing" value="skip" checked> 跳过</label>
+        <label><input type="radio" name="existing" value="update"> 用豆瓣的最新信息更新</label>
+      </fieldset>
+
+      <button type="button" id="scanBtn" class="primary">读取列表</button>
+      <p id="scanStatus" class="row-status"></p>
+    </section>
+
+    <!-- 第二步：确认 -->
+    <section id="review" class="panel" hidden>
+      <h2>2. 确认</h2>
+      <ul id="summary" class="summary"></ul>
+      <div id="fieldsWarn" class="notice" hidden>
+        <p id="fieldsText"></p>
+        <button type="button" id="addFieldsBtn" class="secondary">一键补全这些字段</button>
+      </div>
+      <div class="row-actions">
+        <button type="button" id="startBtn" class="primary">开始导入</button>
+        <button type="button" id="backBtn" class="secondary">返回修改</button>
+      </div>
+    </section>
+
+    <!-- 第三步：进度 -->
+    <section id="progress" class="panel" hidden>
+      <h2>3. 导入中</h2>
+      <p class="muted">请保持这个页面打开。可以切到其他标签页；关掉也没关系，下次打开会接着导。</p>
+      <div class="bar-track"><div id="bar" class="bar-fill"></div></div>
+      <p id="counts" class="counts"></p>
+      <p id="current" class="muted"></p>
+      <div id="blocked" class="notice warn-box" hidden>
+        <p id="blockedText"></p>
+        <a id="blockedLink" href="https://www.douban.com/" target="_blank" rel="noopener">打开豆瓣 →</a>
+      </div>
+      <div class="row-actions">
+        <button type="button" id="pauseBtn" class="secondary">暂停</button>
+        <button type="button" id="continueBtn" class="primary" hidden>继续</button>
+        <button type="button" id="retryBtn" class="secondary" hidden>重试失败的条目</button>
+        <button type="button" id="newBtn" class="secondary" hidden>新的导入</button>
+      </div>
+      <details id="failBox" hidden>
+        <summary id="failSummary"></summary>
+        <ul id="failList" class="log"></ul>
+      </details>
+      <ul id="log" class="log"></ul>
+    </section>
+  </main>
+
+  <script src="import.js" type="module"></script>
+</body>
+</html>

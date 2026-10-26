@@ -112,6 +112,7 @@ async function onSync() {
 
 async function init() {
   $('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
+  $('openImport').addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('import.html') }));
   els.goSettings.addEventListener('click', () => chrome.runtime.openOptionsPage());
   els.sync.addEventListener('click', onSync);
   els.itemType.addEventListener('change', () => {

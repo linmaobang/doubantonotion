@@ -1,9 +1,10 @@
-// 在豆瓣条目页面里运行的抓取函数。
-// 它会通过 chrome.scripting.executeScript({ func }) 注入页面，
-// 所以必须完全自包含：不能引用这个文件里的任何其他变量。
-export function scrapeDouban() {
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+// 豆瓣条目页的抓取函数，有两种用法：
+// 1. 弹窗通过 chrome.scripting.executeScript({ func }) 注入当前页面，不传参数；
+// 2. 批量导入时传入用 DOMParser 解析好的文档和它的网址。
+// 因为第 1 种用法，它必须完全自包含：不能引用这个文件里的任何其他变量。
+export function scrapeDouban(doc = document, href = location.href) {
+  const $ = (sel, root = doc) => root.querySelector(sel);
+  const $$ = (sel, root = doc) => Array.from(root.querySelectorAll(sel));
 
   // 把元素转成纯文本，保留 <br> 和 <p> 带来的换行
   const textWithBreaks = (el) => {
@@ -48,18 +49,18 @@ export function scrapeDouban() {
   const splitList = (s) => (s ? s.split('/').map((x) => x.trim()).filter(Boolean) : []);
 
   const url = (() => {
-    const m = location.href.match(/^https:\/\/(book|movie)\.douban\.com\/subject\/(\d+)/);
-    return m ? `https://${m[1]}.douban.com/subject/${m[2]}/` : location.href;
+    const m = href.match(/^https:\/\/(book|movie)\.douban\.com\/subject\/(\d+)/);
+    return m ? `https://${m[1]}.douban.com/subject/${m[2]}/` : href;
   })();
 
-  const infoEl = document.getElementById('info');
+  const infoEl = doc.getElementById('info');
   if (!infoEl) return { error: '没有在页面上找到条目信息，请确认这是豆瓣图书/电影/剧集的详情页。' };
   const f = parseInfo(infoEl);
 
-  const isBook = location.hostname === 'book.douban.com';
+  const isBook = new URL(href).hostname === 'book.douban.com';
   const isTv = !isBook && ('集数' in f || '首播' in f || '单集片长' in f);
   const fullName = $("h1 span[property='v:itemreviewed']")?.textContent.trim() || '';
-  const shortName = document.title.replace(/\s*\(豆瓣\)\s*$/, '').trim();
+  const shortName = doc.title.replace(/\s*\(豆瓣\)\s*$/, '').trim();
   const title = shortName || fullName;
 
   const base = {

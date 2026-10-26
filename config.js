@@ -8,6 +8,12 @@ const COMMON = {
   url: ['链接', '豆瓣链接', 'url', 'link'],
   cover: ['封面', 'cover', 'image', 'poster'],
   summary: ['简介', 'summary', 'plot'],
+  // 以下是“我的标记”，只在批量导入时有值
+  status: ['状态', '阅读状态', '观看状态', 'status'],
+  my_rating: ['我的评分', 'my rating'],
+  marked_date: ['标记日期', '标记时间', 'date marked'],
+  comment: ['短评', '我的短评', 'comment'],
+  my_tags: ['我的标签', 'my tags'],
 };
 
 const SCREEN = {
@@ -62,8 +68,23 @@ export const MAPPINGS = {
 export const TYPE_LABELS = { book: '图书', movie: '电影', tv: '剧集' };
 export const TYPE_ICONS = { book: '📚', movie: '🎬', tv: '📺' };
 
+// 豆瓣的三种标记状态在不同类型下的叫法
+export const STATUS_LABELS = {
+  book: { mark: '想读', doing: '在读', done: '读过' },
+  movie: { mark: '想看', doing: '在看', done: '看过' },
+  tv: { mark: '想看', doing: '在看', done: '看过' },
+};
+
 const text = { rich_text: {} };
-const status = (...names) => ({ select: { options: names.map((name) => ({ name })) } });
+const status = (type) => ({
+  select: { options: Object.values(STATUS_LABELS[type]).map((name) => ({ name })) },
+});
+const MINE = {
+  我的评分: { number: { format: 'number' } },
+  标记日期: { date: {} },
+  短评: text,
+  我的标签: { multi_select: {} },
+};
 
 // “一键创建数据库”时使用的结构。字段名都能在上面的 MAPPINGS 里找到。
 export const SCHEMAS = {
@@ -73,7 +94,7 @@ export const SCHEMAS = {
     properties: {
       书名: { title: {} },
       封面: { files: {} },
-      状态: status('想读', '在读', '读过'),
+      状态: status('book'),
       评分: { number: { format: 'number' } },
       作者: text,
       译者: text,
@@ -88,6 +109,7 @@ export const SCHEMAS = {
       ISBN: text,
       标签: { multi_select: {} },
       链接: { url: {} },
+      ...MINE,
     },
   },
   movie: {
@@ -96,7 +118,7 @@ export const SCHEMAS = {
     properties: {
       片名: { title: {} },
       封面: { files: {} },
-      状态: status('想看', '看过'),
+      状态: status('movie'),
       评分: { number: { format: 'number' } },
       年份: { number: { format: 'number' } },
       原名: text,
@@ -111,6 +133,7 @@ export const SCHEMAS = {
       IMDb: text,
       标签: { multi_select: {} },
       链接: { url: {} },
+      ...MINE,
     },
   },
   tv: {
@@ -119,7 +142,7 @@ export const SCHEMAS = {
     properties: {
       剧名: { title: {} },
       封面: { files: {} },
-      状态: status('想看', '在看', '看过'),
+      状态: status('tv'),
       评分: { number: { format: 'number' } },
       年份: { number: { format: 'number' } },
       原名: text,
@@ -135,6 +158,7 @@ export const SCHEMAS = {
       IMDb: text,
       标签: { multi_select: {} },
       链接: { url: {} },
+      ...MINE,
     },
   },
 };

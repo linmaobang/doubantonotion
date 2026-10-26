@@ -235,6 +235,32 @@ export class NotionClient {
     return res.results?.[0] || null;
   }
 
+  // 读出数据库里某个链接字段的全部值，用于批量导入前的查重
+  async listUrls(databaseId, property) {
+    const urls = [];
+    let cursor;
+    do {
+      const res = await this.request(`/databases/${databaseId}/query`, {
+        method: 'POST',
+        body: {
+          filter: { property, url: { is_not_empty: true } },
+          page_size: 100,
+          ...(cursor ? { start_cursor: cursor } : {}),
+        },
+      });
+      for (const page of res.results || []) {
+        const url = page.properties?.[property]?.url;
+        if (url) urls.push(url);
+      }
+      cursor = res.has_more ? res.next_cursor : null;
+    } while (cursor);
+    return urls;
+  }
+
+  updateDatabase(id, body) {
+    return this.request(`/databases/${id}`, { method: 'PATCH', body });
+  }
+
   createPage(body) {
     return this.request('/pages', { method: 'POST', body });
   }
