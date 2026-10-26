@@ -1,30 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "豆瓣同步到Notion",
-  "version": "2.0",
-  "description": "一键将豆瓣图书、电影、电视剧信息高效、安全地导入到Notion数据库。",
-  "permissions": [
-    "storage",
-    "activeTab",
-    "scripting"
-  ],
+  "name": "豆瓣同步到 Notion",
+  "version": "3.0.0",
+  "description": "一键把豆瓣图书、电影、剧集的信息和封面保存到 Notion 数据库。",
+  "permissions": ["storage", "activeTab", "scripting", "declarativeNetRequestWithHostAccess"],
   "host_permissions": [
     "https://book.douban.com/*",
     "https://movie.douban.com/*",
+    "https://*.doubanio.com/*",
     "https://api.notion.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://book.douban.com/subject/*",
-        "https://movie.douban.com/subject/*"
-      ],
-      "js": ["content.js"]
-    }
-  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -32,6 +21,10 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "icons": {
     "16": "icons/icon16.png",

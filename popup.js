@@ -1,314 +1,150 @@
-import { bookMapping, movieMapping, tvMapping } from './config.js';
+import { scrapeDouban } from './scraper.js';
+import { TYPE_LABELS } from './config.js';
 
-// --- Pre-defined Schemas for Database Creation ---
-const SCHEMAS = {
-    book: {
-        title: [{ type: 'text', text: { content: '我的书库' } }],
-        icon: { type: 'emoji', emoji: '📚' },
-        properties: {
-            '书名': { title: {} },
-            '作者': { rich_text: {} },
-            '封面': { files: {} },
-            '评分': { number: { format: 'number' } },
-            '标签': { multi_select: {} },
-            '出版日期': { rich_text: {} },
-            '出版社': { rich_text: {} },
-            'ISBN': { rich_text: {} },
-            '出品方': { rich_text: {} },
-            '链接': { url: {} },
-        }
-    },
-    movie: {
-        title: [{ type: 'text', text: { content: '我的影院' } }],
-        icon: { type: 'emoji', emoji: '🎬' },
-        properties: {
-            '片名': { title: {} },
-            '导演': { rich_text: {} },
-            '封面': { files: {} },
-            '评分': { number: { format: 'number' } },
-            '类型': { multi_select: {} },
-            '上映日期': { rich_text: {} },
-            '国家': { rich_text: {} },
-            '出品方': { rich_text: {} },
-            'IMDb': { rich_text: {} },
-            '链接': { url: {} },
-        }
-    },
-    tv: {
-        title: [{ type: 'text', text: { content: '我的剧集' } }],
-        icon: { type: 'emoji', emoji: '📺' },
-        properties: {
-            '剧名': { title: {} },
-            '导演': { rich_text: {} },
-            '封面': { files: {} },
-            '评分': { number: { format: 'number' } },
-            '类型': { multi_select: {} },
-            '首播日期': { rich_text: {} },
-            '国家': { rich_text: {} },
-            '出品方': { rich_text: {} },
-            '集数': { number: {} },
-            '链接': { url: {} },
-        }
-    }
+const $ = (id) => document.getElementById(id);
+const els = {
+  message: $('message'),
+  card: $('card'),
+  cover: $('cover'),
+  title: $('title'),
+  subtitle: $('subtitle'),
+  meta: $('meta'),
+  itemType: $('itemType'),
+  existing: $('existing'),
+  sync: $('sync'),
+  goSettings: $('goSettings'),
+  result: $('result'),
 };
 
-// --- DOM Elements ---
-const notionTokenInput = document.getElementById('notionToken');
-const parentPageIdInput = document.getElementById('parentPageId');
-const bookDatabaseIdInput = document.getElementById('bookDatabaseId');
-const movieDatabaseIdInput = document.getElementById('movieDatabaseId');
-const tvDatabaseIdInput = document.getElementById('tvDatabaseId');
-const saveSettingsButton = document.getElementById('saveSettings');
-const verifyConnectionButton = document.getElementById('verifyConnection');
-const itemTypeSelect = document.getElementById('itemType');
-const getInfoButton = document.getElementById('getInfo');
-const addToNotionButton = document.getElementById('addToNotion');
-const createBookDbBtn = document.getElementById('createBookDb');
-const createMovieDbBtn = document.getElementById('createMovieDb');
-const createTvDbBtn = document.getElementById('createTvDb');
-const statusDiv = document.getElementById('status');
-const infoDiv = document.getElementById('infoDisplay');
+let info = null;
 
-let itemInfo = null;
-
-const MAPPINGS = { book: bookMapping, movie: movieMapping, tv: tvMapping };
-
-// --- Utility Functions ---
-function setStatus(message, isError = false) {
-    statusDiv.textContent = message;
-    statusDiv.style.color = isError ? '#d9534f' : '#5cb85c';
+function show(el, visible = true) {
+  el.hidden = !visible;
 }
 
-function extractIdFromUrl(urlOrId) {
-    if (!urlOrId) return '';
-    const match = urlOrId.match(/([a-f0-9]{32})/);
-    return match ? match[1] : urlOrId; // Return the extracted ID or the original string if no match
+function setMessage(text, kind = 'info') {
+  els.message.textContent = text;
+  els.message.className = `message ${kind}`;
+  show(els.message, !!text);
 }
 
-async function sendMessageToBackground(action, payload) {
-    try {
-        const response = await chrome.runtime.sendMessage({ action, ...payload });
-        if (response.success) return response.data;
-        throw new Error(response.error || 'Unknown background script error');
-    } catch (error) {
-        setStatus(`错误: ${error.message}`, true);
-        console.error(`Error in ${action}:`, error);
-        throw error;
-    }
+function setResult(text, link, kind = 'success') {
+  els.result.replaceChildren(document.createTextNode(text));
+  if (link) {
+    const a = document.createElement('a');
+    a.href = link;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = '在 Notion 中打开 →';
+    els.result.append(' ', a);
+  }
+  els.result.className = `result ${kind}`;
+  show(els.result);
 }
 
-async function sendMessageToContentScript(action, payload) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab) throw new Error("No active tab found.");
-    try {
-        const response = await chrome.tabs.sendMessage(tab.id, { action, ...payload });
-        if (response.success) return response.data;
-        throw new Error(response.error || 'Unknown content script error');
-    } catch (error) {
-        setStatus(`获取信息失败，请确保在正确的豆瓣页面并刷新重试。`, true);
-        console.error(`Error sending message to content script:`, error);
-        throw error;
-    }
+async function callBackground(action, payload = {}) {
+  const res = await chrome.runtime.sendMessage({ action, ...payload });
+  if (!res) throw new Error('后台没有响应，请重新打开弹窗再试。');
+  if (!res.success) throw new Error(res.error);
+  return res.data;
 }
 
-// --- Settings Management ---
-async function saveSettings() {
-    const settings = {
-        notionToken: notionTokenInput.value.trim(),
-        parentPageId: parentPageIdInput.value.trim(),
-        bookDatabaseId: bookDatabaseIdInput.value.trim(),
-        movieDatabaseId: movieDatabaseIdInput.value.trim(),
-        tvDatabaseId: tvDatabaseIdInput.value.trim(),
-    };
-    if (!settings.notionToken) {
-        setStatus('Notion Token 不能为空', true);
-        return;
-    }
-    await chrome.storage.local.set(settings);
-    setStatus('设置已保存!', false);
+function renderCard() {
+  els.title.textContent = info.title;
+  els.subtitle.textContent = [info.original_title || info.subtitle, info.year].filter(Boolean).join(' · ');
+  const people = info.author || info.director;
+  const rating = info.rating ? `豆瓣 ${info.rating}` : '暂无评分';
+  els.meta.textContent = [rating, people].filter(Boolean).join(' · ');
+  if (info.cover) els.cover.src = info.cover;
+  show(els.cover, !!info.cover);
+
+  els.itemType.value = info.type;
+  // 图书只能存为图书；电影和剧集可以互换（豆瓣偶尔分类不准）
+  for (const opt of els.itemType.options) {
+    opt.disabled = info.type === 'book' ? opt.value !== 'book' : opt.value === 'book';
+  }
+  show(els.card);
 }
 
-async function loadSettings() {
-    const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
-    notionTokenInput.value = settings.notionToken || '';
-    parentPageIdInput.value = settings.parentPageId || '';
-    bookDatabaseIdInput.value = settings.bookDatabaseId || '';
-    movieDatabaseIdInput.value = settings.movieDatabaseId || '';
-    tvDatabaseIdInput.value = settings.tvDatabaseId || '';
+function updateSyncLabel(exists) {
+  els.sync.textContent = exists ? '更新 Notion 中的条目' : `保存到 Notion（${TYPE_LABELS[info.type]}库）`;
 }
 
-// --- Core Functions ---
-async function getSettingsForCurrentType() {
-    const type = itemTypeSelect.value;
-    const dbIdKey = `${type}DatabaseId`;
-    const settings = await chrome.storage.local.get(['notionToken', dbIdKey]);
-    return { notionToken: settings.notionToken, databaseId: settings[dbIdKey], type };
+async function checkExisting() {
+  show(els.existing, false);
+  updateSyncLabel(false);
+  try {
+    const { exists, url, dbTitle } = await callBackground('checkExisting', { info });
+    updateSyncLabel(exists);
+    if (exists) {
+      els.existing.replaceChildren(document.createTextNode(`「${dbTitle}」里已经有这条，再次保存会更新它。`));
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = '查看';
+      els.existing.append(' ', a);
+      show(els.existing);
+    }
+  } catch {
+    // 查重失败不影响保存，保存时会给出具体错误
+  }
 }
 
-async function verifyConnection() {
-    const { notionToken, databaseId, type } = await getSettingsForCurrentType();
-    if (!notionToken || !databaseId) {
-        setStatus(`${type.toUpperCase()} 的 Token 或 Database ID 未设置`, true);
-        return;
-    }
-    setStatus(`正在验证 ${type.toUpperCase()} 数据库...`, false);
-    try {
-        await sendMessageToBackground('getDatabaseStructure', { notionToken, databaseId });
-        setStatus('连接成功!', false);
-    } catch (error) {
-        setStatus(`连接失败: ${error.message}`, true);
-    }
+async function onSync() {
+  els.sync.disabled = true;
+  els.sync.textContent = '正在保存…';
+  show(els.result, false);
+  try {
+    const r = await callBackground('sync', { info });
+    const verb = r.updated ? '已更新' : '已保存';
+    const note = r.coverUploaded ? '' : '（封面没能上传，用了外链）';
+    setResult(`${verb}到「${r.dbTitle}」，写入 ${r.matched.length} 个字段${note}。`, r.url);
+    updateSyncLabel(true);
+    show(els.existing, false);
+  } catch (err) {
+    setResult(err.message, null, 'error');
+    updateSyncLabel(false);
+  } finally {
+    els.sync.disabled = false;
+  }
 }
 
-async function getInfo() {
-    const type = itemTypeSelect.value;
-    setStatus(`正在获取${itemTypeSelect.options[itemTypeSelect.selectedIndex].text}信息...`, false);
-    try {
-        itemInfo = await sendMessageToContentScript('getInfo', { type });
-        displayInfo(itemInfo);
-        setStatus('信息获取成功!', false);
-    } catch (error) { /* Status already set */ }
+async function init() {
+  $('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
+  els.goSettings.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  els.sync.addEventListener('click', onSync);
+  els.itemType.addEventListener('change', () => {
+    info.type = els.itemType.value;
+    checkExisting();
+  });
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!/^https:\/\/(book|movie)\.douban\.com\/subject\/\d+/.test(tab?.url || '')) {
+    setMessage('请在豆瓣图书、电影或剧集的详情页打开我。');
+    return;
+  }
+
+  setMessage('正在读取页面…');
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: scrapeDouban });
+    if (!result || result.error) throw new Error(result?.error || '读取页面失败');
+    info = result;
+  } catch (err) {
+    setMessage(`读取页面失败：${err.message}。可以刷新页面后再试。`, 'error');
+    return;
+  }
+  setMessage('');
+  renderCard();
+
+  const settings = await chrome.storage.local.get(['notionToken', `${info.type}DatabaseId`]);
+  if (!settings.notionToken) {
+    setMessage('第一次使用：先在设置页填写 Notion Token 并连接数据库。', 'warn');
+    show(els.goSettings);
+    return;
+  }
+  show(els.sync);
+  checkExisting();
 }
 
-async function addToNotion() {
-    if (!itemInfo) {
-        setStatus('请先获取信息', true);
-        return;
-    }
-    const { notionToken, databaseId, type } = await getSettingsForCurrentType();
-    if (!notionToken || !databaseId) {
-        setStatus(`${type.toUpperCase()} 的 Token 或 Database ID 未设置`, true);
-        return;
-    }
-    setStatus('正在添加到 Notion...', false);
-    try {
-        const dbStructure = await sendMessageToBackground('getDatabaseStructure', { notionToken, databaseId });
-        const properties = mapInfoToNotionProperties(itemInfo, dbStructure.properties, type);
-        const content = createPageContent(itemInfo);
-        await sendMessageToBackground('addToNotion', { notionToken, databaseId, properties, content });
-        setStatus('成功添加到 Notion!', false);
-    } catch (error) {
-        setStatus(`添加到 Notion 失败: ${error.message}`, true);
-    }
-}
-
-async function createDatabase(type) {
-    const notionToken = notionTokenInput.value.trim();
-    const parentPageUrlOrId = parentPageIdInput.value.trim();
-    const parentPageId = extractIdFromUrl(parentPageUrlOrId);
-    const dbIdInput = document.getElementById(`${type}DatabaseId`);
-    const existingDbId = dbIdInput.value.trim();
-
-    if (!notionToken || !parentPageId) {
-        setStatus('请先填写 Notion Token 和有效的父页面ID或URL', true);
-        return;
-    }
-
-    let confirmationMessage = `确定要在父页面下创建新的 ${type.toUpperCase()} 数据库吗？`;
-    if (existingDbId) {
-        confirmationMessage = `一个 ${type.toUpperCase()} 数据库ID已经存在。您确定要创建一个新的数据库吗？这将会替换掉输入框中的旧ID。`;
-    }
-
-    if (!confirm(confirmationMessage)) {
-        return;
-    }
-
-    setStatus(`正在创建 ${type.toUpperCase()} 数据库...`, false);
-    try {
-        const schema = SCHEMAS[type];
-        const newDb = await sendMessageToBackground('createDatabase', { notionToken, parentPageId, schema });
-        dbIdInput.value = newDb.id;
-        await saveSettings();
-        setStatus(`${type.toUpperCase()} 数据库创建成功!`, false);
-    } catch (error) {
-        setStatus(`创建失败: ${error.message}`, true);
-    }
-}
-
-// --- Data Mapping and Formatting ---
-function mapInfoToNotionProperties(info, dbProperties, type) {
-    const mapping = MAPPINGS[type];
-    if (!mapping) return {};
-    const mapped = {};
-    for (const [key, value] of Object.entries(info)) {
-        if (!value || key === 'summary' || key === 'catalog') continue;
-        const notionField = findNotionField(key, dbProperties, mapping);
-        if (notionField) {
-            const formatted = formatPropertyValue(value, dbProperties[notionField].type, key);
-            if (formatted) mapped[notionField] = formatted;
-        }
-    }
-    return mapped;
-}
-
-function findNotionField(fieldKey, dbProperties, mapping) {
-    const possibleNames = mapping[fieldKey] || [fieldKey];
-    for (const name of possibleNames) {
-        const found = Object.keys(dbProperties).find(prop => prop.toLowerCase() === name.toLowerCase());
-        if (found) return found;
-    }
-    return null;
-}
-
-function formatPropertyValue(value, propType, fieldKey) {
-    try {
-        switch (propType) {
-            case 'title': return { title: [{ text: { content: String(value) } }] };
-            case 'rich_text': return { rich_text: [{ text: { content: String(value) } }] };
-            case 'number': return { number: parseFloat(value) || null };
-            case 'select': return { select: { name: String(value) } };
-            case 'multi_select': return Array.isArray(value) ? { multi_select: value.map(item => ({ name: String(item) })) } : { multi_select: [{ name: String(value) }] };
-            case 'date': return { date: { start: new Date(value).toISOString().split('T')[0] } };
-            case 'url': return { url: String(value) };
-            case 'files': return fieldKey === 'cover' ? { files: [{ name: "Cover", type: "external", external: { url: value } }] } : null;
-            default: return null;
-        }
-    } catch (e) { return null; }
-}
-
-function createPageContent(info) {
-    const content = [];
-    if (info.summary) {
-        content.push({ object: 'block', type: 'heading_2', heading_2: { rich_text: [{ type: 'text', text: { content: '简介' } }] } });
-        content.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: info.summary } }] } });
-    }
-    return content;
-}
-
-function displayInfo(info) {
-    const typeText = itemTypeSelect.options[itemTypeSelect.selectedIndex].text;
-    let html = `<h2>${typeText}信息:</h2>`;
-    for (const [key, value] of Object.entries(info)) {
-        if (key === 'cover') {
-            html += `<p><strong>${key}:</strong> <img src="${value}" alt="cover" style="max-width: 100px;"></p>`;
-        } else {
-            html += `<p><strong>${key}:</strong> ${Array.isArray(value) ? value.join(' / ') : value}</p>`;
-        }
-    }
-    infoDiv.innerHTML = html;
-}
-
-// --- Event Listeners & Initialization ---
-document.addEventListener('DOMContentLoaded', async () => {
-    await loadSettings();
-    saveSettingsButton.addEventListener('click', saveSettings);
-    verifyConnectionButton.addEventListener('click', verifyConnection);
-    getInfoButton.addEventListener('click', getInfo);
-    addToNotionButton.addEventListener('click', addToNotion);
-    createBookDbBtn.addEventListener('click', () => createDatabase('book'));
-    createMovieDbBtn.addEventListener('click', () => createDatabase('movie'));
-    createTvDbBtn.addEventListener('click', () => createDatabase('tv'));
-
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const url = tab.url || '';
-
-    if (url.includes('book.douban.com/subject/')) {
-        itemTypeSelect.value = 'book';
-    } else if (url.includes('movie.douban.com/subject/')) {
-        itemTypeSelect.value = 'movie';
-    } else {
-        getInfoButton.disabled = true;
-        addToNotionButton.disabled = true;
-        setStatus('请在豆瓣条目详情页使用本插件', true);
-    }
-});
+init();

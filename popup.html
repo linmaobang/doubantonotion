@@ -2,70 +2,42 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>豆瓣同步到Notion</title>
+  <title>豆瓣同步到 Notion</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
-  <h1>豆瓣同步到Notion</h1>
+<body class="popup">
+  <header class="bar">
+    <h1>豆瓣 → Notion</h1>
+    <button id="openOptions" class="icon-btn" title="设置" aria-label="设置">⚙</button>
+  </header>
 
-  <div class="container">
-    <div class="settings-group">
-      <div class="input-group">
-        <label for="notionToken">Notion Integration Token:</label>
-        <input type="password" id="notionToken" placeholder="输入你的Notion Token">
+  <main>
+    <div id="message" class="message" hidden></div>
+
+    <section id="card" class="card" hidden>
+      <img id="cover" class="cover" alt="">
+      <div class="card-body">
+        <h2 id="title"></h2>
+        <p id="subtitle" class="muted"></p>
+        <p id="meta" class="meta"></p>
+        <label class="type-row">
+          <span>保存为</span>
+          <select id="itemType">
+            <option value="book">图书</option>
+            <option value="movie">电影</option>
+            <option value="tv">剧集</option>
+          </select>
+        </label>
       </div>
-       <div class="input-group">
-        <label for="parentPageId">父页面链接 (用于创建数据库):</label>
-        <input type="text" id="parentPageId" placeholder="输入一个页面链接作为父级">
-      </div>
-      <hr>
-      <div class="db-setting">
-        <div class="input-group">
-          <label for="bookDatabaseId">图书 Database ID:</label>
-          <input type="password" id="bookDatabaseId" placeholder="输入或点击右侧创建">
-        </div>
-        <button id="createBookDb" class="create-db-btn">创建</button>
-      </div>
-      <div class="db-setting">
-        <div class="input-group">
-          <label for="movieDatabaseId">电影 Database ID:</label>
-          <input type="password" id="movieDatabaseId" placeholder="输入或点击右侧创建">
-        </div>
-        <button id="createMovieDb" class="create-db-btn">创建</button>
-      </div>
-      <div class="db-setting">
-        <div class="input-group">
-          <label for="tvDatabaseId">电视剧 Database ID:</label>
-          <input type="password" id="tvDatabaseId" placeholder="输入或点击右侧创建">
-        </div>
-        <button id="createTvDb" class="create-db-btn">创建</button>
-      </div>
-    </div>
+    </section>
 
-    <div class="button-group">
-      <button id="saveSettings">保存设置</button>
-      <button id="verifyConnection">验证当前连接</button>
-    </div>
+    <p id="existing" class="hint" hidden></p>
 
-    <hr>
+    <button id="sync" class="primary" hidden>保存到 Notion</button>
+    <button id="goSettings" class="primary" hidden>打开设置</button>
 
-    <div class="action-header">
-      <label for="itemType">条目类型:</label>
-      <select id="itemType">
-        <option value="book">图书</option>
-        <option value="movie">电影</option>
-        <option value="tv">电视剧</option>
-      </select>
-    </div>
-
-    <div class="action-group">
-      <button id="getInfo">获取信息</button>
-      <button id="addToNotion">保存到Notion</button>
-    </div>
-
-    <div id="status"></div>
-    <div id="infoDisplay"></div>
-  </div>
+    <p id="result" class="result" hidden></p>
+  </main>
 
   <script src="popup.js" type="module"></script>
 </body>

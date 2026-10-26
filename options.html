@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>设置 · 豆瓣同步到 Notion</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="options">
+  <main>
+    <h1>豆瓣同步到 Notion · 设置</h1>
+
+    <section class="panel">
+      <h2>1. 连接 Notion</h2>
+      <p class="muted">
+        在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notion 集成页面</a>
+        新建一个「内部集成」，复制它的 Token 填到这里。
+      </p>
+      <label class="field">
+        <span>Notion Token</span>
+        <div class="input-row">
+          <input type="password" id="notionToken" placeholder="ntn_… 或 secret_…" autocomplete="off">
+          <button type="button" id="toggleToken" class="secondary">显示</button>
+        </div>
+      </label>
+    </section>
+
+    <section class="panel">
+      <h2>2. 选择数据库</h2>
+      <p class="muted">
+        已有数据库：粘贴它的链接或 ID，然后点「验证」。<br>
+        没有数据库：先填一个父页面链接，再点「创建」，插件会建好带全部字段的数据库。<br>
+        无论哪种，都要在 Notion 页面右上角「…」→「连接」里添加你的集成，否则插件没有权限访问。
+      </p>
+      <label class="field">
+        <span>父页面链接（仅创建数据库时需要）</span>
+        <input type="text" id="parentPageId" placeholder="https://www.notion.so/…">
+      </label>
+
+      <div class="db-row" data-type="book">
+        <label class="field">
+          <span>📚 图书数据库</span>
+          <input type="text" id="bookDatabaseId" placeholder="数据库链接或 ID">
+        </label>
+        <div class="row-actions">
+          <button type="button" class="secondary" data-action="verify">验证</button>
+          <button type="button" class="secondary" data-action="create">创建</button>
+        </div>
+        <p class="row-status"></p>
+      </div>
+
+      <div class="db-row" data-type="movie">
+        <label class="field">
+          <span>🎬 电影数据库</span>
+          <input type="text" id="movieDatabaseId" placeholder="数据库链接或 ID">
+        </label>
+        <div class="row-actions">
+          <button type="button" class="secondary" data-action="verify">验证</button>
+          <button type="button" class="secondary" data-action="create">创建</button>
+        </div>
+        <p class="row-status"></p>
+      </div>
+
+      <div class="db-row" data-type="tv">
+        <label class="field">
+          <span>📺 剧集数据库</span>
+          <input type="text" id="tvDatabaseId" placeholder="数据库链接或 ID（可以和电影用同一个）">
+        </label>
+        <div class="row-actions">
+          <button type="button" class="secondary" data-action="verify">验证</button>
+          <button type="button" class="secondary" data-action="create">创建</button>
+        </div>
+        <p class="row-status"></p>
+      </div>
+    </section>
+
+    <div class="save-row">
+      <button type="button" id="save" class="primary">保存设置</button>
+      <span id="saveStatus" class="muted"></span>
+    </div>
+  </main>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>
