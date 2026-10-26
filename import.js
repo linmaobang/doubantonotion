@@ -93,16 +93,14 @@ async function scan() {
     return scanStatus('至少勾选一项要导入的内容。', 'error');
   }
 
-  const settings = await chrome.storage.local.get(['notionToken', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
+  const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
   const needTypes = [
     ...(config.kinds.book.length ? ['book'] : []),
     ...(config.kinds.movie.length ? ['movie', 'tv'] : []),
   ];
-  const noDb = needTypes.filter((t) => !settings[`${t}DatabaseId`]);
-  if (!settings.notionToken || noDb.length) {
-    const what = !settings.notionToken ? 'Notion Token' : noDb.map((t) => `${TYPE_LABELS[t]}数据库`).join('、');
-    return scanStatus(`还没有设置${what}，请先到设置页完成设置。`, 'error');
-  }
+  if (!settings.notionToken) return scanStatus('还没有填写 Notion Token，请先到设置页完成设置。', 'error');
+  const noTarget = needTypes.filter((t) => !settings.parentPageId && !settings[`${t}DatabaseId`]);
+  if (noTarget.length) return scanStatus('还没有选择 Notion 页面，请先到设置页填一个页面链接。', 'error');
 
   $('scanBtn').disabled = true;
   try {
@@ -122,24 +120,17 @@ async function scan() {
       }
     }
 
-    // 2. 查 Notion 里已有的条目
+    // 2. 查 Notion 里已有的条目，顺便看每类会写进哪个数据库
     scanStatus('正在检查 Notion 里已有的条目…');
     const existing = new Set();
-    const dedupe = {};
+    const targets = {};
     for (const type of needTypes) {
       const r = await bg('listExisting', { type });
-      dedupe[type] = r;
+      targets[type] = r;
       r.keys.forEach((k) => existing.add(k));
     }
     const alreadyIn = items.filter((i) => existing.has(subjectKey(i.url)));
     const todo = config.onExisting === 'skip' ? items.filter((i) => !existing.has(subjectKey(i.url))) : items;
-
-    // 3. 检查字段
-    const missing = {};
-    for (const type of needTypes) {
-      const r = await bg('checkFields', { type });
-      if (r.missing.length) missing[type] = r;
-    }
 
     job = {
       config,
@@ -150,8 +141,8 @@ async function scan() {
       failures: [],
       found: items.length,
       alreadyIn: alreadyIn.length,
-      noDedupe: Object.entries(dedupe).filter(([, r]) => !r.canDedupe).map(([t]) => t),
-      missing,
+      noDedupe: Object.entries(targets).filter(([, r]) => !r.canDedupe).map(([t]) => t),
+      targets: Object.fromEntries(Object.entries(targets).map(([t, r]) => [t, { how: r.how, dbTitle: r.dbTitle, missing: r.missing }])),
       createdAt: Date.now(),
     };
     await saveJob();
@@ -209,27 +200,19 @@ function showReview() {
   }
   $('summary').replaceChildren(...lines.map(li));
 
-  const missingText = Object.entries(job.missing)
-    .map(([t, r]) => `「${r.dbTitle}」缺少：${r.missing.join('、')}`)
-    .join('；');
-  $('fieldsText').textContent = `${missingText}。这些信息（包括你的标记和评分）不会被写入。`;
-  $('fieldsWarn').hidden = !missingText;
+  // 每类条目会写进哪个数据库
+  const used = new Set(job.items.map((i) => i.type));
+  const targetLines = Object.entries(job.targets || {})
+    .filter(([t]) => used.has(t))
+    .map(([t, r]) => {
+      const head = `${TYPE_LABELS[t]}会写进`;
+      if (r.how === 'create') return `${head}自动新建的「${r.dbTitle}」。`;
+      const extra = r.missing.length ? `，并补上缺少的字段：${r.missing.join('、')}` : '';
+      return `${head}「${r.dbTitle}」${extra}。`;
+    });
+  $('targets').replaceChildren(...targetLines.map(li));
+  $('targets').hidden = targetLines.length === 0;
   $('startBtn').disabled = job.items.length === 0;
-}
-
-async function addFields() {
-  $('addFieldsBtn').disabled = true;
-  try {
-    // 电影和剧集可能是同一个数据库，补过一次就不用再补
-    for (const type of Object.keys(job.missing)) await bg('addMissingFields', { type });
-    job.missing = {};
-    await saveJob();
-    showReview();
-  } catch (err) {
-    $('fieldsText').textContent = `补全失败：${err.message}`;
-  } finally {
-    $('addFieldsBtn').disabled = false;
-  }
 }
 
 // ---------- 第三步：导入 ----------
@@ -396,7 +379,6 @@ async function init() {
   $('scanBtn').addEventListener('click', scan);
   $('startBtn').addEventListener('click', run);
   $('backBtn').addEventListener('click', () => show('setup'));
-  $('addFieldsBtn').addEventListener('click', addFields);
   $('pauseBtn').addEventListener('click', () => {
     pauseRequested = true;
     $('pauseBtn').disabled = true;

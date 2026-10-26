@@ -25,52 +25,64 @@
     </section>
 
     <section class="panel">
-      <h2>2. 选择数据库</h2>
+      <h2>2. 选一个 Notion 页面</h2>
       <p class="muted">
-        已有数据库：粘贴它的链接或 ID，然后点「验证」。<br>
-        没有数据库：先填一个父页面链接，再点「创建」，插件会建好带全部字段的数据库。<br>
-        无论哪种，都要在 Notion 页面右上角「…」→「连接」里添加你的集成，否则插件没有权限访问。
+        随便一个页面就行，空白页也可以。插件会在里面自动建好「我的书库」「我的影院」「我的剧集」。
+        页面里已经有这些数据库的话，会直接沿用，只补上缺少的字段。<br>
+        记得在这个页面右上角「…」→「连接」里添加你的集成，否则插件没有权限访问。
       </p>
       <label class="field">
-        <span>父页面链接（仅创建数据库时需要）</span>
+        <span>页面链接</span>
         <input type="text" id="parentPageId" placeholder="https://www.notion.so/…">
       </label>
-
-      <div class="db-row" data-type="book">
-        <label class="field">
-          <span>📚 图书数据库</span>
-          <input type="text" id="bookDatabaseId" placeholder="数据库链接或 ID">
-        </label>
-        <div class="row-actions">
-          <button type="button" class="secondary" data-action="verify">验证</button>
-          <button type="button" class="secondary" data-action="create">创建</button>
-        </div>
-        <p class="row-status"></p>
+      <div class="row-actions">
+        <button type="button" id="checkBtn" class="secondary">保存并检查</button>
+        <button type="button" id="applyBtn" class="secondary" hidden>现在就建好 / 补全</button>
       </div>
+      <ul id="plan" class="summary" hidden></ul>
+    </section>
 
-      <div class="db-row" data-type="movie">
-        <label class="field">
-          <span>🎬 电影数据库</span>
-          <input type="text" id="movieDatabaseId" placeholder="数据库链接或 ID">
-        </label>
-        <div class="row-actions">
-          <button type="button" class="secondary" data-action="verify">验证</button>
-          <button type="button" class="secondary" data-action="create">创建</button>
-        </div>
-        <p class="row-status"></p>
-      </div>
+    <section class="panel">
+      <details id="advanced">
+        <summary>已有数据库（可选）</summary>
+        <p class="muted">
+          想把条目写进页面之外的某个数据库，可以在这里指定，插件只会补充字段、写入条目，不会新建。
+          留空则按上面的页面自动处理。
+        </p>
 
-      <div class="db-row" data-type="tv">
-        <label class="field">
-          <span>📺 剧集数据库</span>
-          <input type="text" id="tvDatabaseId" placeholder="数据库链接或 ID（可以和电影用同一个）">
-        </label>
-        <div class="row-actions">
-          <button type="button" class="secondary" data-action="verify">验证</button>
-          <button type="button" class="secondary" data-action="create">创建</button>
+        <div class="db-row" data-type="book">
+          <label class="field">
+            <span>📚 图书数据库</span>
+            <input type="text" id="bookDatabaseId" placeholder="数据库链接或 ID">
+          </label>
+          <div class="row-actions">
+            <button type="button" class="secondary" data-action="verify">验证</button>
+          </div>
+          <p class="row-status"></p>
         </div>
-        <p class="row-status"></p>
-      </div>
+
+        <div class="db-row" data-type="movie">
+          <label class="field">
+            <span>🎬 电影数据库</span>
+            <input type="text" id="movieDatabaseId" placeholder="数据库链接或 ID">
+          </label>
+          <div class="row-actions">
+            <button type="button" class="secondary" data-action="verify">验证</button>
+          </div>
+          <p class="row-status"></p>
+        </div>
+
+        <div class="db-row" data-type="tv">
+          <label class="field">
+            <span>📺 剧集数据库</span>
+            <input type="text" id="tvDatabaseId" placeholder="数据库链接或 ID（可以和电影用同一个）">
+          </label>
+          <div class="row-actions">
+            <button type="button" class="secondary" data-action="verify">验证</button>
+          </div>
+          <p class="row-status"></p>
+        </div>
+      </details>
     </section>
 
     <div class="save-row">

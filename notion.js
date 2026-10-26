@@ -257,6 +257,23 @@ export class NotionClient {
     return urls;
   }
 
+  // 页面里的全部子块（用来找页面里已有的数据库）
+  async listChildren(pageId) {
+    const blocks = [];
+    let cursor;
+    do {
+      const query = `page_size=100${cursor ? `&start_cursor=${cursor}` : ''}`;
+      const res = await this.request(`/blocks/${pageId}/children?${query}`);
+      blocks.push(...(res.results || []));
+      cursor = res.has_more ? res.next_cursor : null;
+    } while (cursor);
+    return blocks;
+  }
+
+  getPage(id) {
+    return this.request(`/pages/${id}`);
+  }
+
   updateDatabase(id, body) {
     return this.request(`/databases/${id}`, { method: 'PATCH', body });
   }

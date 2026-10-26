@@ -1,5 +1,6 @@
-import { MAPPINGS, SCHEMAS } from './config.js';
+import { MAPPINGS } from './config.js';
 import { blockKind, subjectKey } from './douban.js';
+import { resolveDatabase } from './databases.js';
 import {
   NotionClient,
   buildChildren,
@@ -81,15 +82,6 @@ async function getSettings() {
   ]);
 }
 
-async function getTarget(type) {
-  const settings = await getSettings();
-  const token = settings.notionToken;
-  const databaseId = normalizeId(settings[`${type}DatabaseId`]);
-  if (!token) throw new Error('还没有填写 Notion Token，请先打开设置页。');
-  if (!databaseId) throw new Error('还没有设置这个类型的数据库，请先打开设置页。');
-  return { client: new NotionClient(token), databaseId };
-}
-
 // 数据库结构缓存 5 分钟，避免每次打开弹窗都重新拉取
 const dbCache = new Map();
 async function getDatabaseCached(client, id) {
@@ -100,6 +92,55 @@ async function getDatabaseCached(client, id) {
   return db;
 }
 
+// 已经确认过（找到/建好/补全字段）的数据库，这次后台运行期间不再重复检查
+const ready = new Map(); // type -> databaseId
+// 同一类型同时只解析一次，避免弹窗和批量导入同时触发、建出两个库
+const resolving = new Map();
+
+/**
+ * 拿到要写入的数据库。
+ * create = true：找不到就建，缺字段就补（真正保存时用）；
+ * create = false：只看不动（打开弹窗、导入预览时用），库还不存在时 databaseId 为 null。
+ */
+async function getTarget(type, { create = true } = {}) {
+  const settings = await getSettings();
+  if (!settings.notionToken) throw new Error('还没有填写 Notion Token，请先打开设置页。');
+  const client = new NotionClient(settings.notionToken);
+
+  if (!create) {
+    const r = await resolveDatabase(client, settings, type, { create: false });
+    return { client, ...r };
+  }
+  const known = ready.get(type);
+  if (known && known === normalizeId(settings[`${type}DatabaseId`])) {
+    return { client, databaseId: known, how: 'configured', added: [] };
+  }
+
+  if (!resolving.has(type)) {
+    const job = (async () => {
+      const r = await resolveDatabase(client, settings, type, { create: true });
+      // 记住找到/新建的数据库，下次直接用
+      if (r.databaseId !== normalizeId(settings[`${type}DatabaseId`])) {
+        await chrome.storage.local.set({ [`${type}DatabaseId`]: r.databaseId });
+      }
+      ready.set(type, r.databaseId);
+      dbCache.delete(r.databaseId);
+      return r;
+    })().finally(() => resolving.delete(type));
+    resolving.set(type, job);
+  }
+  return { client, ...(await resolving.get(type)) };
+}
+
+// 设置变了（换了页面或数据库），重新解析
+chrome.storage.onChanged.addListener((changes) => {
+  if ('notionToken' in changes || 'parentPageId' in changes) ready.clear();
+  for (const type of ['book', 'movie', 'tv']) {
+    const change = changes[`${type}DatabaseId`];
+    if (change && change.newValue !== ready.get(type)) ready.delete(type);
+  }
+});
+
 async function findExistingPage(client, databaseId, db, type, url) {
   const field = findField('url', db.properties, MAPPINGS[type]);
   if (!field || db.properties[field].type !== 'url' || !url) return null;
@@ -109,7 +150,8 @@ async function findExistingPage(client, databaseId, db, type, url) {
 // ---------- 操作 ----------
 
 async function checkExisting({ info }) {
-  const { client, databaseId } = await getTarget(info.type);
+  const { client, databaseId, dbTitle } = await getTarget(info.type, { create: false });
+  if (!databaseId) return { exists: false, url: null, dbTitle };
   const db = await getDatabaseCached(client, databaseId);
   const page = await findExistingPage(client, databaseId, db, info.type, info.url);
   return { exists: !!page, url: page?.url || null, dbTitle: databaseTitle(db) };
@@ -117,7 +159,8 @@ async function checkExisting({ info }) {
 
 async function sync({ info }) {
   const { type } = info;
-  const { client, databaseId } = await getTarget(type);
+  const target = await getTarget(type);
+  const { client, databaseId } = target;
   dbCache.delete(databaseId); // 同步时总是用最新结构
   const db = await getDatabaseCached(client, databaseId);
   const existing = await findExistingPage(client, databaseId, db, type, info.url);
@@ -141,6 +184,8 @@ async function sync({ info }) {
     matched,
     coverUploaded: !!coverUploadId,
     dbTitle: databaseTitle(db),
+    dbCreated: target.how === 'created',
+    fieldsAdded: target.added || [],
   };
 }
 
@@ -154,10 +199,35 @@ async function verify({ token, databaseId, type }) {
   return { title: databaseTitle(db), matched: [...new Set(matched)] };
 }
 
-async function createDatabase({ token, parentPageId, type }) {
-  const client = new NotionClient(token);
-  const db = await client.createDatabase(normalizeId(parentPageId), SCHEMAS[type]);
-  return { id: db.id, url: db.url };
+// 设置页的“检查”：确认页面能访问，并说明每个类型会用哪个数据库。
+// apply = true 时立即建库/补字段。
+async function preparePage({ apply = false }) {
+  const settings = await getSettings();
+  if (!settings.notionToken) throw new Error('先填写 Notion Token。');
+  const pageId = normalizeId(settings.parentPageId);
+  if (pageId) {
+    const client = new NotionClient(settings.notionToken);
+    try {
+      await client.getPage(pageId);
+    } catch (err) {
+      // 用户可能贴的是数据库链接
+      const isDb = await client.getDatabase(pageId).then(() => true, () => false);
+      if (isDb) {
+        throw new Error('这是一个数据库的链接，不是页面。请填数据库所在的页面，或者在下面「已有数据库」里指定它。');
+      }
+      throw err;
+    }
+  }
+  const result = {};
+  for (const type of ['book', 'movie', 'tv']) {
+    try {
+      const r = await getTarget(type, { create: apply });
+      result[type] = { how: r.how, dbTitle: r.dbTitle, missing: r.missing || [], added: r.added || [] };
+    } catch (err) {
+      result[type] = { error: friendlyError(err) };
+    }
+  }
+  return result;
 }
 
 // ---------- 批量导入用到的操作 ----------
@@ -199,44 +269,18 @@ async function doubanPage({ url }) {
   return { html, url: res.url };
 }
 
-// 数据库里已有条目的豆瓣编号，用来跳过已导入的
+// 数据库里已有条目的豆瓣编号，用来跳过已导入的；同时说明会用哪个数据库
 async function listExisting({ type }) {
-  const { client, databaseId } = await getTarget(type);
-  const db = await client.getDatabase(databaseId);
+  const { client, databaseId, how, dbTitle, missing } = await getTarget(type, { create: false });
+  const plan = { how, dbTitle, missing: missing || [] };
+  if (!databaseId) return { ...plan, canDedupe: true, keys: [] }; // 库还没建，自然没有重复
+  const db = await getDatabaseCached(client, databaseId);
+  // 链接字段如果是待补的，补上后也是空的，同样不会重复
   const field = findField('url', db.properties, MAPPINGS[type]);
-  if (!field || db.properties[field].type !== 'url') {
-    return { databaseId, dbTitle: databaseTitle(db), canDedupe: false, keys: [] };
-  }
+  if (!field) return { ...plan, canDedupe: true, keys: [] };
+  if (db.properties[field].type !== 'url') return { ...plan, canDedupe: false, keys: [] };
   const urls = await client.listUrls(databaseId, field);
-  return { databaseId, dbTitle: databaseTitle(db), canDedupe: true, keys: urls.map(subjectKey).filter(Boolean) };
-}
-
-// 找出数据库里缺少的字段（和“一键建库”的结构相比）
-function missingFields(db, type) {
-  const mapping = MAPPINGS[type];
-  const schema = SCHEMAS[type].properties;
-  const missing = {};
-  for (const key of Object.keys(mapping)) {
-    if (key === 'title' || findField(key, db.properties, mapping)) continue;
-    const name = Object.keys(schema).find((n) => mapping[key].some((c) => c.toLowerCase() === n.toLowerCase()));
-    if (name) missing[name] = schema[name];
-  }
-  return missing;
-}
-
-async function checkFields({ type }) {
-  const { client, databaseId } = await getTarget(type);
-  const db = await client.getDatabase(databaseId);
-  return { dbTitle: databaseTitle(db), missing: Object.keys(missingFields(db, type)) };
-}
-
-async function addMissingFields({ type }) {
-  const { client, databaseId } = await getTarget(type);
-  const db = await client.getDatabase(databaseId);
-  const missing = missingFields(db, type);
-  if (Object.keys(missing).length) await client.updateDatabase(databaseId, { properties: missing });
-  dbCache.delete(databaseId);
-  return { added: Object.keys(missing) };
+  return { ...plan, canDedupe: true, keys: urls.map(subjectKey).filter(Boolean) };
 }
 
 // 导入页切到后台后，页面里的定时器会被 Chrome 限流，所以等待放在后台脚本里做
@@ -247,12 +291,10 @@ const HANDLERS = {
   checkExisting,
   sync,
   verify,
-  createDatabase,
+  preparePage,
   doubanInterests,
   doubanPage,
   listExisting,
-  checkFields,
-  addMissingFields,
 };
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {

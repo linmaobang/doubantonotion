@@ -98,7 +98,11 @@ async function onSync() {
   try {
     const r = await callBackground('sync', { info });
     const verb = r.updated ? '已更新' : '已保存';
-    const note = r.coverUploaded ? '' : '（封面没能上传，用了外链）';
+    const notes = [];
+    if (r.dbCreated) notes.push(`新建了数据库「${r.dbTitle}」`);
+    if (r.fieldsAdded.length) notes.push(`给数据库补上了 ${r.fieldsAdded.length} 个字段`);
+    if (!r.coverUploaded) notes.push('封面没能上传，用了外链');
+    const note = notes.length ? `（${notes.join('；')}）` : '';
     setResult(`${verb}到「${r.dbTitle}」，写入 ${r.matched.length} 个字段${note}。`, r.url);
     updateSyncLabel(true);
     show(els.existing, false);
@@ -138,9 +142,10 @@ async function init() {
   setMessage('');
   renderCard();
 
-  const settings = await chrome.storage.local.get(['notionToken', `${info.type}DatabaseId`]);
-  if (!settings.notionToken) {
-    setMessage('第一次使用：先在设置页填写 Notion Token 并连接数据库。', 'warn');
+  const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
+  const hasTarget = settings.parentPageId || settings[`${info.type}DatabaseId`];
+  if (!settings.notionToken || !hasTarget) {
+    setMessage('第一次使用：先在设置页填写 Notion Token，并选一个 Notion 页面。', 'warn');
     show(els.goSettings);
     return;
   }
