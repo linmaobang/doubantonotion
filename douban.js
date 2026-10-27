@@ -33,6 +33,7 @@ export function infoFromInterest(interest) {
     rating,
     summary: s.intro || '',
     // 我的标记
+    mark: interest.status, // mark / doing / done，用于筛选；不会写进 Notion
     status: STATUS_LABELS[type][interest.status] || '',
     my_rating: interest.rating?.value ? String(interest.rating.value) : '',
     marked_date: (interest.create_time || '').slice(0, 10),

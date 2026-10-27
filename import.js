@@ -1,5 +1,6 @@
-import { TYPE_LABELS, STATUS_LABELS } from './config.js';
+import { TYPE_ICONS, TYPE_LABELS, STATUS_LABELS } from './config.js';
 import { infoFromInterest, mergeDetail, parseUserId, subjectKey } from './douban.js';
+import { EMPTY_FILTERS, defaultSelection, filterItems, summarizeSelection, yearsOf } from './selection.js';
 import { scrapeDouban } from './scraper.js';
 
 // ---------- 节奏控制 ----------
@@ -62,7 +63,6 @@ function readConfig() {
     uid: parseUserId($('uid').value),
     kinds: { book: checked('book'), movie: checked('movie') },
     detail: checked('detail')[0] === 'full',
-    onExisting: checked('existing')[0],
   };
 }
 
@@ -129,18 +129,21 @@ async function scan() {
       targets[type] = r;
       r.keys.forEach((k) => existing.add(k));
     }
-    const alreadyIn = items.filter((i) => existing.has(subjectKey(i.url)));
-    const todo = config.onExisting === 'skip' ? items.filter((i) => !existing.has(subjectKey(i.url))) : items;
+    for (const item of items) {
+      item.key = subjectKey(item.url);
+      item.exists = existing.has(item.key);
+    }
 
     job = {
       config,
       phase: 'review',
-      items: todo,
+      all: items, // 豆瓣上读到的全部条目
+      selected: [...defaultSelection(items)], // 勾选的条目（subjectKey）
+      filters: { ...EMPTY_FILTERS },
+      items: [], // 开始导入时按勾选生成
       next: 0,
       stats: { created: 0, updated: 0, failed: 0 },
       failures: [],
-      found: items.length,
-      alreadyIn: alreadyIn.length,
       noDedupe: Object.entries(targets).filter(([, r]) => !r.canDedupe).map(([t]) => t),
       targets: Object.fromEntries(Object.entries(targets).map(([t, r]) => [t, { how: r.how, dbTitle: r.dbTitle, missing: r.missing }])),
       createdAt: Date.now(),
@@ -163,7 +166,7 @@ function scanError(err) {
   return err.message;
 }
 
-// ---------- 第二步：确认 ----------
+// ---------- 第二步：挑选 ----------
 
 function minutes(n) {
   const perItem = job.config.detail ? 5 : 1.2; // 秒，包含写 Notion 的时间
@@ -177,31 +180,133 @@ function li(text) {
   return el;
 }
 
-function showReview() {
-  show('review');
-  const byType = {};
-  for (const i of job.items) byType[i.type] = (byType[i.type] || 0) + 1;
-  const parts = Object.entries(byType).map(([t, n]) => `${TYPE_LABELS[t]} ${n}`);
-  const lines = [`豆瓣上共读到 ${job.found} 条标记。`];
-  if (job.alreadyIn) {
-    lines.push(
-      job.config.onExisting === 'skip'
-        ? `其中 ${job.alreadyIn} 条已经在 Notion 里，会跳过。`
-        : `其中 ${job.alreadyIn} 条已经在 Notion 里，会更新。`,
-    );
-  }
-  lines.push(
-    job.items.length
-      ? `本次要处理 ${job.items.length} 条（${parts.join('，')}），${minutes(job.items.length)}。`
-      : '没有需要导入的新条目。',
-  );
-  for (const t of job.noDedupe) {
-    lines.push(`⚠ ${TYPE_LABELS[t]}数据库没有「链接」字段，无法判断是否重复，可能会导入重复条目。`);
-  }
-  $('summary').replaceChildren(...lines.map(li));
+let selected = new Set();
 
-  // 每类条目会写进哪个数据库
-  const used = new Set(job.items.map((i) => i.type));
+// 勾选变化很频繁，存盘稍微攒一下
+let saveTimer = null;
+function saveSelectionSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    job.selected = [...selected];
+    saveJob();
+  }, 400);
+}
+
+function chip(group, value, label, checked) {
+  const el = document.createElement('label');
+  el.className = 'chip';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.value = value;
+  box.checked = checked;
+  box.addEventListener('change', () => {
+    job.filters[group] = [...el.parentElement.querySelectorAll('input:checked')].map((i) => i.value);
+    renderList();
+    saveSelectionSoon();
+  });
+  el.append(box, label);
+  return el;
+}
+
+function buildFilters() {
+  const f = job.filters;
+  const types = ['book', 'movie', 'tv'].filter((t) => job.all.some((i) => i.type === t));
+  $('typeFilter').replaceChildren(...types.map((t) => chip('types', t, `${TYPE_ICONS[t]} ${TYPE_LABELS[t]}`, f.types.includes(t))));
+  $('typeFilter').hidden = types.length < 2;
+
+  const hasBook = job.all.some((i) => i.type === 'book');
+  const hasScreen = job.all.some((i) => i.type !== 'book');
+  const markLabel = (m) => {
+    const b = STATUS_LABELS.book[m];
+    const v = STATUS_LABELS.movie[m];
+    return hasBook && hasScreen ? `${b}/${v}` : hasBook ? b : v;
+  };
+  const marks = ['mark', 'doing', 'done'].filter((m) => job.all.some((i) => i.mark === m));
+  $('markFilter').replaceChildren(...marks.map((m) => chip('marks', m, markLabel(m), f.marks.includes(m))));
+  $('markFilter').hidden = marks.length < 2;
+
+  $('yearFilter').replaceChildren(
+    new Option('全部年份', ''),
+    ...yearsOf(job.all).map((y) => new Option(`${y} 年标记`, y)),
+  );
+  $('yearFilter').value = f.year;
+  $('ratingFilter').value = f.rating;
+  $('showFilter').value = f.show;
+  $('queryFilter').value = f.query;
+}
+
+function stars(n) {
+  return n ? '★'.repeat(Number(n)) : '';
+}
+
+function itemRow(item) {
+  const row = document.createElement('li');
+  const label = document.createElement('label');
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = selected.has(item.key);
+  box.dataset.key = item.key;
+
+  const body = document.createElement('span');
+  body.className = 'item-body';
+  const title = document.createElement('a');
+  title.href = item.url;
+  title.target = '_blank';
+  title.rel = 'noopener';
+  title.textContent = item.title;
+  title.addEventListener('click', (e) => e.stopPropagation());
+  const meta = document.createElement('span');
+  meta.className = 'muted item-meta';
+  meta.textContent = [
+    `${TYPE_ICONS[item.type]} ${TYPE_LABELS[item.type]}`,
+    item.status,
+    stars(item.my_rating),
+    item.marked_date,
+    item.author || item.director,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  body.append(title, meta);
+
+  label.append(box, body);
+  if (item.exists) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = '已在 Notion';
+    badge.title = '勾选后会用豆瓣的最新信息更新它';
+    label.append(badge);
+  }
+  row.append(label);
+  return row;
+}
+
+function visibleItems() {
+  return filterItems(job.all, job.filters);
+}
+
+function renderList() {
+  const items = visibleItems();
+  const frag = document.createDocumentFragment();
+  for (const item of items) frag.append(itemRow(item));
+  $('itemList').replaceChildren(frag);
+  $('visibleCount').textContent =
+    items.length === job.all.length ? `共 ${items.length} 条` : `筛选出 ${items.length} / ${job.all.length} 条`;
+  if (!items.length) $('itemList').append(li('没有符合条件的条目'));
+  renderSelection();
+}
+
+function renderSelection() {
+  const { total, toCreate, toUpdate } = summarizeSelection(job.all, selected);
+  const parts = [];
+  if (toCreate) parts.push(`新增 ${toCreate}`);
+  if (toUpdate) parts.push(`更新 ${toUpdate}`);
+  $('selectionText').textContent = total
+    ? `已选 ${total} 条（${parts.join('，')}），${minutes(total)}`
+    : '还没有选择条目';
+  $('startBtn').disabled = total === 0;
+
+  // 每类条目会写进哪个数据库（只说选中的类型）
+  const used = new Set(job.all.filter((i) => selected.has(i.key)).map((i) => i.type));
   const targetLines = Object.entries(job.targets || {})
     .filter(([t]) => used.has(t))
     .map(([t, r]) => {
@@ -212,7 +317,44 @@ function showReview() {
     });
   $('targets').replaceChildren(...targetLines.map(li));
   $('targets').hidden = targetLines.length === 0;
-  $('startBtn').disabled = job.items.length === 0;
+}
+
+function setVisible(checked) {
+  for (const item of visibleItems()) {
+    if (checked) selected.add(item.key);
+    else selected.delete(item.key);
+  }
+  for (const box of $('itemList').querySelectorAll('input[type=checkbox]')) box.checked = checked;
+  renderSelection();
+  saveSelectionSoon();
+}
+
+function showReview() {
+  show('review');
+  selected = new Set(job.selected || []);
+  job.filters = { ...EMPTY_FILTERS, ...(job.filters || {}) };
+
+  const existing = job.all.filter((i) => i.exists).length;
+  const lines = [`豆瓣上共读到 ${job.all.length} 条标记${existing ? `，其中 ${existing} 条已经在 Notion 里` : ''}。`];
+  lines.push('默认勾选了所有还没导入的。勾选「已在 Notion」的条目，会用豆瓣的最新信息更新它。');
+  for (const t of job.noDedupe) {
+    lines.push(`⚠ ${TYPE_LABELS[t]}数据库的「链接」字段不是网址类型，无法判断是否重复。`);
+  }
+  $('summary').replaceChildren(...lines.map(li));
+
+  buildFilters();
+  renderList();
+}
+
+async function startImport() {
+  clearTimeout(saveTimer);
+  job.selected = [...selected];
+  job.items = job.all.filter((i) => selected.has(i.key));
+  job.next = 0;
+  job.stats = { created: 0, updated: 0, failed: 0 };
+  job.failures = [];
+  await saveJob();
+  run();
 }
 
 // ---------- 第三步：导入 ----------
@@ -372,12 +514,36 @@ function fillForm(config) {
     for (const box of document.querySelectorAll(`input[name="${kind}"]`)) box.checked = config.kinds[kind].includes(box.value);
   }
   document.querySelector(`input[name="detail"][value="${config.detail ? 'full' : 'fast'}"]`).checked = true;
-  document.querySelector(`input[name="existing"][value="${config.onExisting}"]`).checked = true;
 }
 
 async function init() {
   $('scanBtn').addEventListener('click', scan);
-  $('startBtn').addEventListener('click', run);
+  $('startBtn').addEventListener('click', startImport);
+  $('selectVisible').addEventListener('click', () => setVisible(true));
+  $('clearVisible').addEventListener('click', () => setVisible(false));
+  $('itemList').addEventListener('change', (e) => {
+    const key = e.target.dataset?.key;
+    if (!key) return;
+    if (e.target.checked) selected.add(key);
+    else selected.delete(key);
+    renderSelection();
+    saveSelectionSoon();
+  });
+  for (const [id, field] of [['yearFilter', 'year'], ['ratingFilter', 'rating'], ['showFilter', 'show']]) {
+    $(id).addEventListener('change', () => {
+      job.filters[field] = $(id).value;
+      renderList();
+      saveSelectionSoon();
+    });
+  }
+  let queryTimer = null;
+  $('queryFilter').addEventListener('input', () => {
+    clearTimeout(queryTimer);
+    queryTimer = setTimeout(() => {
+      job.filters.query = $('queryFilter').value;
+      renderList();
+    }, 150);
+  });
   $('backBtn').addEventListener('click', () => show('setup'));
   $('pauseBtn').addEventListener('click', () => {
     pauseRequested = true;
@@ -411,10 +577,15 @@ async function init() {
   const stored = (await chrome.storage.local.get(JOB_KEY))[JOB_KEY];
   if (stored && stored.phase !== 'done') {
     job = stored;
+    // 旧版本存下的任务没有完整列表：把待导入的条目当作全部，并全部勾上
+    if (!job.all) {
+      job.all = job.items.map((i) => ({ ...i, key: subjectKey(i.url), exists: false }));
+      job.selected = job.all.map((i) => i.key);
+    }
     fillForm(job.config);
     $('resumeText').textContent =
       job.phase === 'review'
-        ? `上次读取了 ${job.items.length} 条待导入的标记，还没开始。`
+        ? `上次读取了 ${job.all.length} 条标记，还没开始导入。`
         : `上次的导入还没完成：已处理 ${job.next} / ${job.items.length} 条。`;
     $('resume').hidden = false;
   } else if (stored) {
