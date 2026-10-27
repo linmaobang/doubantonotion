@@ -102,3 +102,44 @@ export function sourceLabel(url, name) {
   if (/\/people\/[^/]+\/(collect|wish|do)/.test(url)) return n;
   return n || '豆瓣页面';
 }
+
+// 我的读书笔记列表页：book.douban.com/people/{id}/annotation/
+// 每本书一块（.annotations-item），标题链接到 /people/{id}/annotation/{书的编号}/，下面是笔记链接。
+// 某本书笔记很多时，列表里只显示一部分，返回 moreUrl 让调用方再去那本书的笔记页读。
+export function collectNotes(doc, href) {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const abs = (h) => new URL(h, href).href;
+  const root = doc.querySelector('#content .article') || doc.body;
+  // 某一本书的笔记页（/people/{id}/annotation/{书的编号}/）：书的编号在网址里
+  const pageSid = href.match(/\/people\/[^/]+\/annotation\/(\d+)/)?.[1] || null;
+  const books = new Map();
+  for (const a of root.querySelectorAll('a[href*="/annotation/"]')) {
+    const url = abs(a.getAttribute('href'));
+    const noteId = url.match(/book\.douban\.com\/annotation\/(\d+)\/?$/)?.[1];
+    if (!noteId) continue;
+    const box = a.closest('.annotations-item');
+    const head = box?.querySelector('h3 a');
+    const sid = head?.getAttribute('href').match(/\/annotation\/(\d+)/)?.[1] || pageSid;
+    if (!sid) continue;
+    if (!books.has(sid)) {
+      const count = Number(clean(head?.textContent).match(/\((\d+)\)\s*$/)?.[1]) || 0;
+      books.set(sid, { sid, title: head?.getAttribute('title') || '', count, moreUrl: head ? abs(head.getAttribute('href')) : null, notes: [] });
+    }
+    const book = books.get(sid);
+    if (!book.notes.some((n) => n.url === url)) {
+      book.notes.push({ kind: 'note', id: noteId, url, title: clean(a.textContent), subjectUrl: `https://book.douban.com/subject/${sid}/` });
+    }
+  }
+  const nextEl = doc.querySelector('.paginator .next a[href]');
+  return { books: [...books.values()], next: nextEl ? abs(nextEl.getAttribute('href')) : null };
+}
+
+// 一条读书笔记的全文页：book.douban.com/annotation/{id}/
+export function parseNote(doc) {
+  const text = doc.body?.textContent || '';
+  return {
+    title: (doc.querySelector('h1')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    html: doc.querySelector('#link-report')?.innerHTML || '',
+    date: text.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '',
+  };
+}

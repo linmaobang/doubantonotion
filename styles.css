@@ -614,3 +614,4 @@ details .db-row { border-top: none; padding-top: 4px; }
 .map-actions .spacer { flex: 1; }
 .map-actions .primary { width: auto; padding: 8px 20px; }
 @media (max-width: 520px) { .map-row { grid-template-columns: 1fr; } .map-row .map-hint { grid-column: 1; } }
+.badge.writing { background: none; border: 1px solid var(--border); }

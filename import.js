@@ -10,7 +10,7 @@ import {
   yearsOf,
 } from './selection.js';
 import { scrapeDouban } from './scraper.js';
-import { collectSubjects, sourceLabel } from './collector.js';
+import { collectNotes, collectSubjects, parseNote, sourceLabel } from './collector.js';
 import { openMappingDialog } from './mapping.js';
 
 // ---------- 节奏控制 ----------
@@ -93,6 +93,7 @@ function readConfig() {
     // 列表页只有标题和评分，必须逐条抓详情页
     detail: mode === 'page' || checked('detail')[0] === 'full',
     pageUrl: $('pageUrl').value.trim(),
+    writings: mode === 'mine' && $('withWritings').checked,
     maxPages: Number($('maxPages').value),
   };
 }
@@ -133,7 +134,65 @@ async function collectMine(config) {
       }
     }
   }
-  return { items, note: '' };
+  let note = '';
+  if (config.writings) note = await attachWritings(config, items);
+  return { items, note };
+}
+
+// 读我写的书评 / 影评和读书笔记，挂到对应的条目上（全文在导入时再逐篇读）
+async function attachWritings(config, items) {
+  const byKey = new Map(items.map((i) => [subjectKey(i.url), i]));
+  const add = (w) => {
+    const item = byKey.get(subjectKey(w.subjectUrl));
+    if (!item) return false; // 写了评论但没标记过的条目，不单独导入
+    item.writings = item.writings || [];
+    if (item.writings.some((x) => x.url === w.url)) return false; // 同一条在列表页和单本书的笔记页都出现
+    item.writings.push(w);
+    return true;
+  };
+  let reviews = 0;
+  let notes = 0;
+
+  for (const kind of ['book', 'movie']) {
+    if (!config.kinds[kind].length) continue;
+    for (let start = 0, total = Infinity; start < total; start += PAGE_SIZE) {
+      await doubanGap(LIST_GAP_MS);
+      const page = await bg('doubanReviews', { uid: config.uid, kind, start, count: PAGE_SIZE });
+      total = page.total;
+      for (const r of page.reviews) if (add(r)) reviews++;
+      scanStatus(`正在读取你写的${kind === 'book' ? '书评' : '影评'}：${Math.min(start + PAGE_SIZE, total)} / ${total}`);
+      if (!page.reviews.length) break;
+    }
+  }
+
+  if (config.kinds.book.length) {
+    const seenBooks = new Set();
+    let url = `https://book.douban.com/people/${encodeURIComponent(config.uid)}/annotation/`;
+    const extra = []; // 笔记多、列表里没显示全的书
+    while (url) {
+      await doubanGap(HTML_PAGE_GAP_MS);
+      const { html, url: finalUrl } = await bg('doubanHtml', { url });
+      const r = collectNotes(new DOMParser().parseFromString(html, 'text/html'), finalUrl);
+      for (const book of r.books) {
+        seenBooks.add(book.sid);
+        for (const n of book.notes) if (add(n)) notes++;
+        if (book.count > book.notes.length && book.moreUrl) extra.push(book.moreUrl);
+      }
+      scanStatus(`正在读取你的读书笔记：已找到 ${notes} 条`);
+      url = r.next;
+    }
+    for (let more of extra) {
+      while (more) {
+        await doubanGap(HTML_PAGE_GAP_MS);
+        const { html, url: finalUrl } = await bg('doubanHtml', { url: more });
+        const r = collectNotes(new DOMParser().parseFromString(html, 'text/html'), finalUrl);
+        for (const book of r.books) for (const n of book.notes) if (add(n)) notes++;
+        more = r.next;
+      }
+    }
+  }
+  if (!reviews && !notes) return '没有找到你写的书评 / 影评或读书笔记（只能读到公开的）。';
+  return `另外找到你写的 ${reviews} 篇评论、${notes} 条读书笔记，会放进对应条目的页面正文。`;
 }
 
 // 豆瓣上的列表：一页页读，顺着“后页”往下翻
@@ -287,9 +346,9 @@ function scanError(err) {
 
 // ---------- 第二步：挑选 ----------
 
-function minutes(n) {
+function minutes(n, writings = 0) {
   const perItem = job.config.detail ? 5 : 1.2; // 秒，包含写 Notion 的时间
-  const m = Math.ceil((n * perItem) / 60);
+  const m = Math.ceil((n * perItem + writings * 4.5) / 60);
   return m < 60 ? `约 ${m} 分钟` : `约 ${(m / 60).toFixed(1)} 小时`;
 }
 
@@ -403,6 +462,13 @@ function itemRow(item) {
   body.append(title, meta);
 
   label.append(box, thumb, body);
+  if (item.writings?.length) {
+    const w = document.createElement('span');
+    w.className = 'badge writing';
+    w.textContent = `📝 ${item.writings.length}`;
+    w.title = '会把你写的评论 / 笔记一起放进页面';
+    label.append(w);
+  }
   if (item.exists) {
     const badge = document.createElement('span');
     badge.className = 'badge';
@@ -443,8 +509,10 @@ function renderSelection() {
   const parts = [];
   if (toCreate) parts.push(`新增 ${toCreate}`);
   if (toUpdate) parts.push(`更新 ${toUpdate}`);
+  const writings = job.all.filter((i) => selected.has(i.key)).reduce((n, i) => n + (i.writings?.length || 0), 0);
+  if (writings) parts.push(`含 ${writings} 篇评论 / 笔记`);
   $('selectionText').textContent = total
-    ? `已选 ${total} 条（${parts.join('，')}），${minutes(total)}`
+    ? `已选 ${total} 条（${parts.join('，')}），${minutes(total, writings)}`
     : '还没有选择条目';
   $('startBtn').disabled = total === 0;
 }
@@ -781,7 +849,8 @@ function renderProgress() {
   $('statCreated').textContent = stats.created;
   $('statUpdated').textContent = stats.updated;
   $('statFailed').textContent = stats.failed;
-  $('statLeft').textContent = done ? '—' : minutes(items.length - next).replace('约 ', '');
+  const leftWritings = items.slice(next).reduce((n, i) => n + (i.writings?.length || 0), 0);
+  $('statLeft').textContent = done ? '—' : minutes(items.length - next, leftWritings).replace('约 ', '');
 
   // 切到别的标签页时，从标签页标题就能看到进度
   $('progressTitle').textContent = running ? '3. 导入中' : done ? '3. 导入完成' : '3. 已暂停';
@@ -815,7 +884,35 @@ function renderProgress() {
 }
 
 // 取一条的完整信息：列表数据 +（可选）详情页
+// 逐篇读书评 / 笔记的全文
+async function collectWritings(item) {
+  const out = [];
+  for (const w of item.writings || []) {
+    await doubanGap(DETAIL_GAP_MS + Math.random() * DETAIL_JITTER_MS);
+    try {
+      if (w.kind === 'review') {
+        const r = await bg('doubanReviewContent', { id: w.id });
+        out.push({ ...w, html: r.html, title: r.title || w.title, date: r.date || w.date });
+      } else {
+        const { html, url } = await bg('doubanHtml', { url: w.url });
+        const n = parseNote(new DOMParser().parseFromString(html, 'text/html'));
+        out.push({ ...w, url, html: n.html, title: n.title || w.title, date: n.date });
+      }
+    } catch (err) {
+      if (err.code === 'DOUBAN_NOT_FOUND') continue; // 删掉了就跳过
+      throw err;
+    }
+  }
+  return out;
+}
+
 async function collectInfo(item) {
+  const info = await collectDetail(item);
+  if (item.writings?.length) info.writings = await collectWritings(item);
+  return info;
+}
+
+async function collectDetail(item) {
   if (!job.config.detail) return item;
   await doubanGap(DETAIL_GAP_MS + Math.random() * DETAIL_JITTER_MS);
   try {
@@ -874,7 +971,8 @@ async function run() {
       if (r.updated) job.stats.updated++;
       else job.stats.created++;
       if (r.dbUrl) job.dbLinks = { ...(job.dbLinks || {}), [r.dbTitle]: r.dbUrl };
-      log(`${r.updated ? '已更新' : '已新增'}：${item.title}`, 'success');
+      const extra = r.writingsAdded ? `（放进了 ${r.writingsAdded} 篇评论 / 笔记）` : '';
+      log(`${r.updated ? '已更新' : '已新增'}：${item.title}${extra}`, 'success');
     } catch (err) {
       if (err.code === 'DOUBAN_CHALLENGE') {
         // 验证页只能在浏览器里通过，等待没用：直接暂停，请用户打开这一条的豆瓣页面
@@ -973,6 +1071,7 @@ function fillForm(config) {
     for (const box of document.querySelectorAll(`input[name="${kind}"]`)) box.checked = (config.kinds?.[kind] || []).includes(box.value);
   }
   document.querySelector(`input[name="detail"][value="${config.detail ? 'full' : 'fast'}"]`).checked = true;
+  $('withWritings').checked = !!config.writings;
   $('pageUrl').value = config.pageUrl || '';
   if (config.maxPages !== undefined) $('maxPages').value = String(config.maxPages);
 }

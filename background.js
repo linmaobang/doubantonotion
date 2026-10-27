@@ -2,6 +2,7 @@ import { MAPPINGS } from './config.js';
 import { blockKind, mergeDetail, subjectKey } from './douban.js';
 import { missingFields, resolveChosen, resolveDatabase } from './databases.js';
 import { DEFAULT_STATE, STATE_KEY, runOnce } from './autosync.js';
+import { buildWritingBlocks, chunk, normalizeWritingUrl, writingUrlsIn } from './writings.js';
 import {
   NotionClient,
   buildChildren,
@@ -259,14 +260,28 @@ async function sync({ info, target: chosen }) {
   const decorations = pageDecorations(info, coverUploadId, fieldMap);
   if (existing) keepOldSources(properties, existing, db, type);
 
-  const page = existing
-    ? await client.updatePage(existing.id, { properties, ...decorations })
-    : await client.createPage({
-        parent: { database_id: databaseId },
-        properties,
-        children: buildChildren(info, fieldMap),
-        ...decorations,
-      });
+  // 书评 / 笔记：已有的页面只追加还没放过的
+  let writings = info.writings || [];
+  if (existing && writings.length) {
+    const have = writingUrlsIn(await client.listChildren(existing.id));
+    writings = writings.filter((w) => !have.has(normalizeWritingUrl(w.url)));
+  }
+  const writingBlocks = buildWritingBlocks(writings);
+
+  let page;
+  if (existing) {
+    page = await client.updatePage(existing.id, { properties, ...decorations });
+    for (const part of chunk(writingBlocks)) await client.appendChildren(page.id, part);
+  } else {
+    const [first, ...rest] = chunk([...buildChildren(info, fieldMap), ...writingBlocks]);
+    page = await client.createPage({
+      parent: { database_id: databaseId },
+      properties,
+      children: first || [],
+      ...decorations,
+    });
+    for (const part of rest) await client.appendChildren(page.id, part); // 一次最多 100 块，多的分批追加
+  }
 
   return {
     url: page.url,
@@ -277,6 +292,7 @@ async function sync({ info, target: chosen }) {
     dbUrl: db.url,
     databaseId,
     dbCreated: target.how === 'created',
+    writingsAdded: writings.length,
     fieldsAdded: target.added || [],
   };
 }
@@ -370,6 +386,39 @@ async function doubanPage({ url }) {
   if (kind === 'challenge') throw new DoubanError('DOUBAN_CHALLENGE', '豆瓣弹出了安全验证。');
   if (kind === 'rate') throw new DoubanError('DOUBAN_BLOCKED', '豆瓣认为请求太频繁。');
   return { html, url: res.url };
+}
+
+// 我写的书评 / 影评列表（移动版接口，未登录也能读公开的）
+async function doubanReviews({ uid, kind, start = 0, count = 50 }) {
+  await ensureRefererRule();
+  const url = `https://m.douban.com/rexxar/api/v2/user/${encodeURIComponent(uid)}/reviews?type=${kind}&start=${start}&count=${count}&for_mobile=1`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (res.status === 403 || res.status === 418 || res.status === 429) throw new DoubanError('DOUBAN_BLOCKED', '豆瓣认为请求太频繁。');
+  const data = await res.json().catch(() => null);
+  if (/sec\.douban\.com/.test(res.url) || (res.ok && !data)) throw new DoubanError('DOUBAN_CHALLENGE', '豆瓣要求做一次安全验证。');
+  if (!res.ok || !data) throw new DoubanError('DOUBAN_ERROR', `豆瓣返回错误（${res.status}）。`);
+  return {
+    total: data.total || 0,
+    reviews: (data.reviews || []).map((r) => ({
+      kind: 'review',
+      id: String(r.id),
+      url: r.url,
+      title: r.title || '',
+      date: (r.create_time || '').slice(0, 10),
+      subjectUrl: r.subject?.url || '',
+    })),
+  };
+}
+
+// 一篇书评 / 影评的全文（HTML）
+async function doubanReviewContent({ id }) {
+  await ensureRefererRule();
+  const res = await fetch(`https://m.douban.com/rexxar/api/v2/review/${encodeURIComponent(id)}?for_mobile=1`, { credentials: 'include' });
+  if (res.status === 404) throw new DoubanError('DOUBAN_NOT_FOUND', '这篇评论已不存在。');
+  if (res.status === 403 || res.status === 418 || res.status === 429) throw new DoubanError('DOUBAN_BLOCKED', '豆瓣认为请求太频繁。');
+  const data = await res.json().catch(() => null);
+  if (!data) throw new DoubanError('DOUBAN_CHALLENGE', '豆瓣要求做一次安全验证。');
+  return { html: data.content || data.abstract || '', title: data.title || '', date: (data.create_time || '').slice(0, 10) };
 }
 
 // 当前登录的豆瓣账号：douban.com/mine/ 会跳到自己的主页；没登录会跳到登录页
@@ -568,6 +617,8 @@ const HANDLERS = {
   doubanPage,
   doubanHtml,
   doubanMe,
+  doubanReviews,
+  doubanReviewContent,
   listExisting,
   prepareTarget,
   listDatabases,

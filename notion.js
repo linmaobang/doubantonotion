@@ -335,6 +335,10 @@ export class NotionClient {
     return this.request(`/databases/${id}`, { method: 'PATCH', body });
   }
 
+  appendChildren(blockId, children) {
+    return this.request(`/blocks/${blockId}/children`, { method: 'PATCH', body: { children } });
+  }
+
   createPage(body) {
     return this.request('/pages', { method: 'POST', body });
   }
