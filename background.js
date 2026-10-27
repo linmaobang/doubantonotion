@@ -1,6 +1,6 @@
 import { MAPPINGS } from './config.js';
 import { blockKind, mergeDetail, subjectKey } from './douban.js';
-import { resolveChosen, resolveDatabase } from './databases.js';
+import { missingFields, resolveChosen, resolveDatabase } from './databases.js';
 import { DEFAULT_STATE, STATE_KEY, runOnce } from './autosync.js';
 import {
   NotionClient,
@@ -11,6 +11,7 @@ import {
   mapProperties,
   normalizeId,
   pageDecorations,
+  resolveFieldMap,
 } from './notion.js';
 
 // ---------- 豆瓣的 Referer 校验 ----------
@@ -84,6 +85,7 @@ async function getSettings() {
     'bookDatabaseId',
     'movieDatabaseId',
     'tvDatabaseId',
+    'fieldMaps',
   ]);
 }
 
@@ -202,6 +204,47 @@ function keepOldSources(properties, existingPage, db, type) {
   properties[field] = { multi_select: names.map((name) => ({ name })) };
 }
 
+async function getFieldMapFor(databaseId) {
+  const { fieldMaps = {} } = await chrome.storage.local.get('fieldMaps');
+  return fieldMaps[normalizeId(databaseId)] || null;
+}
+
+// ---------- 字段对应窗口 ----------
+
+async function getFieldMap({ databaseId, type }) {
+  const settings = await getSettings();
+  const client = new NotionClient(settings.notionToken);
+  const id = normalizeId(databaseId);
+  const db = await client.getDatabase(id);
+  const saved = settings.fieldMaps?.[id] || null;
+  return {
+    databaseId: id,
+    dbTitle: databaseTitle(db),
+    properties: Object.entries(db.properties).map(([name, p]) => ({
+      name,
+      type: p.type,
+      options: (p[p.type]?.options || []).map((o) => o.name),
+    })),
+    resolved: resolveFieldMap(db.properties, type, saved), // 现在实际会怎么写
+    auto: resolveFieldMap(db.properties, type, null), // 完全自动时会怎么写
+    missing: Object.keys(missingFields(db.properties, type, saved || { addMissing: true })),
+    saved,
+  };
+}
+
+async function saveFieldMap({ databaseId, fieldMap }) {
+  const { fieldMaps = {} } = await chrome.storage.local.get('fieldMaps');
+  const id = normalizeId(databaseId);
+  if (fieldMap) fieldMaps[id] = { ...fieldMap, updatedAt: Date.now() };
+  else delete fieldMaps[id]; // 恢复成自动对应
+  await chrome.storage.local.set({ fieldMaps });
+  // 字段规则变了，之前“已经补过字段”的判断作废
+  ready.clear();
+  chosenReady.clear();
+  dbCache.delete(id);
+  return { ok: true };
+}
+
 async function sync({ info, target: chosen }) {
   const { type } = info;
   const target = await getTarget(type, { target: chosen });
@@ -210,9 +253,10 @@ async function sync({ info, target: chosen }) {
   const db = await getDatabaseCached(client, databaseId);
   const existing = await findExistingPage(client, databaseId, db, type, info.url);
 
+  const fieldMap = await getFieldMapFor(databaseId);
   const coverUploadId = await uploadCover(client, info);
-  const { properties, matched } = mapProperties(info, db.properties, type, { coverUploadId });
-  const decorations = pageDecorations(info, coverUploadId);
+  const { properties, matched } = mapProperties(info, db.properties, type, { coverUploadId }, fieldMap);
+  const decorations = pageDecorations(info, coverUploadId, fieldMap);
   if (existing) keepOldSources(properties, existing, db, type);
 
   const page = existing
@@ -220,7 +264,7 @@ async function sync({ info, target: chosen }) {
     : await client.createPage({
         parent: { database_id: databaseId },
         properties,
-        children: buildChildren(info),
+        children: buildChildren(info, fieldMap),
         ...decorations,
       });
 
@@ -281,7 +325,7 @@ async function preparePage({ apply = false }) {
   for (const type of ['book', 'movie', 'tv']) {
     try {
       const r = await getTarget(type, { create: apply });
-      out.types[type] = { how: r.how, dbTitle: r.dbTitle, missing: r.missing || [], added: r.added || [] };
+      out.types[type] = { how: r.how, dbTitle: r.dbTitle, databaseId: r.databaseId, missing: r.missing || [], added: r.added || [] };
     } catch (err) {
       out.types[type] = { error: friendlyError(err) };
     }
@@ -358,7 +402,7 @@ async function doubanHtml({ url }) {
 // 数据库里已有条目的豆瓣编号，用来跳过已导入的；同时说明会用哪个数据库
 async function listExisting({ type, target }) {
   const { client, databaseId, how, dbTitle, missing } = await getTarget(type, { create: false, target });
-  const plan = { how, dbTitle, missing: missing || [] };
+  const plan = { how, dbTitle, missing: missing || [], databaseId };
   if (!databaseId) return { ...plan, canDedupe: true, keys: [] }; // 库还没建，自然没有重复
   const db = await getDatabaseCached(client, databaseId);
   // 链接字段如果是待补的，补上后也是空的，同样不会重复
@@ -529,6 +573,8 @@ const HANDLERS = {
   listDatabases,
   setAutoSync,
   runAutoSyncNow,
+  getFieldMap,
+  saveFieldMap,
 };
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {

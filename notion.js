@@ -118,16 +118,46 @@ export function findField(key, dbProperties, mapping) {
   return null;
 }
 
-export function mapProperties(info, dbProperties, type, extra = {}) {
+// 用户在“字段对应”窗口里的设置（按数据库保存）：
+//   map:     { 豆瓣字段: Notion 列名 }      手动指定的对应
+//   ignored: [Notion 列名]                  设成“不写入”的列，自动匹配也不会用它
+//   addMissing / body / pageCover          见 databases.js、buildChildren、pageDecorations
+export function resolveFieldMap(dbProperties, type, fieldMap = null) {
   const mapping = MAPPINGS[type] || {};
+  const manual = fieldMap?.map || {};
+  const blocked = new Set([...(fieldMap?.ignored || []), ...Object.values(manual)]);
+  // 自动匹配只在没被占用、没被设成“不写入”的列里找
+  const free = Object.fromEntries(Object.entries(dbProperties).filter(([name]) => !blocked.has(name)));
+  const result = {};
+  const used = new Set();
+  for (const key of Object.keys(mapping)) {
+    let field = manual[key];
+    if (field && !(field in dbProperties)) field = null; // 列被删了：退回自动匹配
+    if (!field) field = findField(key, free, mapping);
+    if (field && !used.has(field)) {
+      result[key] = field;
+      used.add(field);
+    }
+  }
+  return result;
+}
+
+// Notion 的“状态”列只能写已有的选项，写错整页都会失败，所以先核对
+function formatStatusProp(value, prop) {
+  const name = String(Array.isArray(value) ? value[0] : value);
+  const options = [...(prop.status?.options || []), ...(prop.status?.groups || [])].map((o) => o.name);
+  return options.includes(name) ? { status: { name } } : null;
+}
+
+export function mapProperties(info, dbProperties, type, extra = {}, fieldMap = null) {
+  const fields = resolveFieldMap(dbProperties, type, fieldMap);
   const properties = {};
   const matched = [];
-  for (const key of Object.keys(mapping)) {
+  for (const [key, field] of Object.entries(fields)) {
     const value = info[key];
     if (isEmpty(value)) continue;
-    const field = findField(key, dbProperties, mapping);
-    if (!field || field in properties) continue;
-    const formatted = formatValue(value, dbProperties[field].type, key, extra);
+    const prop = dbProperties[field];
+    const formatted = prop.type === 'status' ? formatStatusProp(value, prop) : formatValue(value, prop.type, key, extra);
     if (formatted) {
       properties[field] = formatted;
       matched.push(field);
@@ -148,15 +178,17 @@ function heading(text) {
   return { object: 'block', type: 'heading_2', heading_2: { rich_text: richText(text) } };
 }
 
-export function buildChildren(info) {
+export function buildChildren(info, fieldMap = null) {
+  const body = { summary: true, author_intro: true, ...(fieldMap?.body || {}) };
   const blocks = [];
-  if (info.summary) blocks.push(heading('简介'), ...paragraphs(info.summary));
-  if (info.author_intro) blocks.push(heading('作者简介'), ...paragraphs(info.author_intro));
+  if (body.summary && info.summary) blocks.push(heading('简介'), ...paragraphs(info.summary));
+  if (body.author_intro && info.author_intro) blocks.push(heading('作者简介'), ...paragraphs(info.author_intro));
   return blocks.slice(0, 100); // 一次请求最多 100 个块
 }
 
-export function pageDecorations(info, coverUploadId) {
+export function pageDecorations(info, coverUploadId, fieldMap = null) {
   const deco = { icon: { type: 'emoji', emoji: TYPE_ICONS[info.type] || '📄' } };
+  if (fieldMap?.pageCover === false) return deco;
   if (coverUploadId) deco.cover = { type: 'file_upload', file_upload: { id: coverUploadId } };
   else if (info.cover) deco.cover = { type: 'external', external: { url: info.cover } };
   return deco;

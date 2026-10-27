@@ -165,3 +165,70 @@ export const SCHEMAS = {
     },
   },
 };
+
+// ---------- 字段对应窗口用的说明 ----------
+// kind 决定这个豆瓣字段可以写进哪些类型的 Notion 列
+export const FIELD_INFO = {
+  title: { label: '标题', kind: 'text' },
+  subtitle: { label: '副标题', kind: 'text' },
+  original_title: { label: '原名 / 原作名', kind: 'text' },
+  author: { label: '作者', kind: 'text' },
+  translator: { label: '译者', kind: 'text' },
+  publisher: { label: '出版社', kind: 'text' },
+  production_company: { label: '出品方', kind: 'text' },
+  pubdate: { label: '出版日期', kind: 'date' },
+  pages: { label: '页数', kind: 'number' },
+  price: { label: '定价', kind: 'number' },
+  binding: { label: '装帧', kind: 'text' },
+  isbn: { label: 'ISBN', kind: 'text' },
+  series: { label: '丛书', kind: 'text' },
+  author_intro: { label: '作者简介', kind: 'longtext' },
+  year: { label: '年份', kind: 'number' },
+  director: { label: '导演', kind: 'text' },
+  screenwriter: { label: '编剧', kind: 'text' },
+  actors: { label: '主演', kind: 'text' },
+  genres: { label: '类型', kind: 'list' },
+  country: { label: '国家 / 地区', kind: 'text' },
+  language: { label: '语言', kind: 'text' },
+  aka: { label: '又名', kind: 'text' },
+  imdb: { label: 'IMDb', kind: 'text' },
+  release_date: { label: '上映日期', kind: 'date' },
+  runtime: { label: '片长', kind: 'text' },
+  first_air_date: { label: '首播日期', kind: 'date' },
+  episodes: { label: '集数', kind: 'number' },
+  episode_runtime: { label: '单集片长', kind: 'text' },
+  seasons: { label: '季数', kind: 'number' },
+  rating: { label: '豆瓣评分', kind: 'number' },
+  tags: { label: '豆瓣标签', kind: 'list' },
+  url: { label: '豆瓣链接', kind: 'url' },
+  cover: { label: '封面', kind: 'image' },
+  summary: { label: '简介', kind: 'longtext' },
+  status: { label: '我的状态（想读 / 读过…）', kind: 'status' },
+  my_rating: { label: '我的评分', kind: 'number' },
+  marked_date: { label: '标记日期', kind: 'date' },
+  comment: { label: '我的短评', kind: 'longtext' },
+  my_tags: { label: '我的标签', kind: 'list' },
+  source: { label: '来源（豆列 / 标签…）', kind: 'list' },
+};
+
+// 每种字段能写进哪些 Notion 列类型
+export const KIND_ACCEPTS = {
+  text: ['rich_text', 'title', 'select', 'multi_select'],
+  longtext: ['rich_text', 'title'],
+  number: ['number', 'rich_text', 'select'],
+  date: ['date', 'rich_text'],
+  list: ['multi_select', 'rich_text', 'select'],
+  url: ['url', 'rich_text'],
+  image: ['files', 'url'],
+  status: ['select', 'status', 'multi_select', 'rich_text'],
+};
+
+// 插件能写入的 Notion 列类型
+export const WRITABLE_TYPES = ['title', 'rich_text', 'number', 'select', 'multi_select', 'status', 'date', 'url', 'files'];
+
+export const PROP_TYPE_LABELS = {
+  title: '标题', rich_text: '文本', number: '数字', select: '单选', multi_select: '多选', status: '状态',
+  date: '日期', url: '链接', files: '文件', checkbox: '勾选框', people: '人员', relation: '关联',
+  formula: '公式', rollup: '汇总', created_time: '创建时间', last_edited_time: '编辑时间',
+  created_by: '创建人', last_edited_by: '编辑人', email: '邮箱', phone_number: '电话', unique_id: '编号',
+};

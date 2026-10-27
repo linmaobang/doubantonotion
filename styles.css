@@ -561,3 +561,56 @@ details .db-row { border-top: none; padding-top: 4px; }
 .auto-footer.error { color: var(--error); }
 .auto-footer.warn { color: var(--warn); }
 .auto-footer .text-btn { margin-left: auto; font-size: 12px; text-decoration: underline; white-space: nowrap; }
+
+/* ---------- 字段对应窗口 ---------- */
+.map-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+.map-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
+.map-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+.map-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.map-head h2 { font-size: 16px; }
+.map-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+.map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.map-row:last-child { border-bottom: none; }
+.map-row.disabled { opacity: 0.55; }
+.map-row .map-hint { grid-column: 2; }
+.map-col { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.map-col strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.type-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.map-missing, .map-body { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.switch-row.small { font-weight: 400; font-size: 13px; }
+.map-actions { display: flex; align-items: center; gap: 8px; }
+.map-actions .spacer { flex: 1; }
+.map-actions .primary { width: auto; padding: 8px 20px; }
+@media (max-width: 520px) { .map-row { grid-template-columns: 1fr; } .map-row .map-hint { grid-column: 1; } }

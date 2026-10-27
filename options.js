@@ -2,6 +2,7 @@ import { TYPE_ICONS, TYPE_LABELS } from './config.js';
 import { normalizeId } from './notion.js';
 import { DEFAULT_STATE, STATE_KEY, describeStatus } from './autosync.js';
 import { parseUserId } from './douban.js';
+import { openMappingDialog } from './mapping.js';
 
 const $ = (id) => document.getElementById(id);
 const DB_KEYS = ['bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId'];
@@ -52,7 +53,24 @@ function li(text, kind = '') {
   return el;
 }
 
+function mapButton(type, databaseId) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'text-btn';
+  b.textContent = '字段对应…';
+  b.addEventListener('click', async () => {
+    if (await openMappingDialog({ databaseId, type })) check(false);
+  });
+  return b;
+}
+
 function describe(type, r) {
+  const item = describeLine(type, r);
+  if (r.databaseId && !r.error) item.append(' ', mapButton(type, r.databaseId));
+  return item;
+}
+
+function describeLine(type, r) {
   const head = `${TYPE_ICONS[type]} ${TYPE_LABELS[type]}：`;
   if (r.error) return li(head + r.error, 'error');
   const fields = (list) => (list.length > 4 ? `${list.slice(0, 4).join('、')} 等 ${list.length} 个` : list.join('、'));

@@ -1,5 +1,5 @@
 import { MAPPINGS, SCHEMAS } from './config.js';
-import { NotionError, databaseTitle, findField, normalizeId } from './notion.js';
+import { NotionError, databaseTitle, normalizeId, resolveFieldMap } from './notion.js';
 
 // 在用户的页面里找现成数据库时，认这些名字（不区分大小写，完全一致才算）
 export const DB_TITLE_ALIASES = {
@@ -10,14 +10,18 @@ export const DB_TITLE_ALIASES = {
 
 // 和自动建库的结构相比，数据库里还缺哪些字段。
 // 已有的字段（按候选名匹配到的）一律不动，哪怕类型不一样。
-export function missingFields(dbProperties, type) {
+export function missingFields(dbProperties, type, fieldMap = null) {
+  if (fieldMap && fieldMap.addMissing === false) return {}; // 用户选了“不要新建列”
   const mapping = MAPPINGS[type];
   const schema = SCHEMAS[type].properties;
+  const resolved = resolveFieldMap(dbProperties, type, fieldMap);
+  const existing = new Set(Object.keys(dbProperties).map((n) => n.trim().toLowerCase()));
   const missing = {};
   for (const key of Object.keys(mapping)) {
-    if (key === 'title' || findField(key, dbProperties, mapping)) continue;
+    if (key === 'title' || resolved[key]) continue;
     const name = Object.keys(schema).find((n) => mapping[key].some((c) => c.toLowerCase() === n.toLowerCase()));
-    if (name && !(name in missing)) missing[name] = schema[name];
+    // 同名的列已经存在（比如被设成了“不写入”）：绝不去动它
+    if (name && !(name in missing) && !existing.has(name.toLowerCase())) missing[name] = schema[name];
   }
   return missing;
 }
@@ -87,7 +91,7 @@ export async function resolveDatabase(client, settings, type, { create = true } 
     return { how: 'created', databaseId: db.id, db, dbTitle: databaseTitle(db), missing: [], added: [] };
   }
 
-  const missing = missingFields(db.properties, type);
+  const missing = missingFields(db.properties, type, settings.fieldMaps?.[normalizeId(db.id)]);
   const names = Object.keys(missing);
   if (!create || names.length === 0) {
     return { how, databaseId: db.id, db, dbTitle: databaseTitle(db), missing: names, added: [] };
@@ -117,7 +121,7 @@ export async function resolveChosen(client, settings, type, target, { create = t
   if (kind === 'existing') {
     let db = await client.getDatabase(normalizeId(target.databaseId));
     if (db.archived || db.in_trash) throw new Error(`数据库「${databaseTitle(db)}」已经被删除了，请换一个。`);
-    const missing = missingFields(db.properties, type);
+    const missing = missingFields(db.properties, type, settings.fieldMaps?.[normalizeId(db.id)]);
     const names = Object.keys(missing);
     if (!create || names.length === 0) {
       return { how: 'chosen', databaseId: db.id, db, dbTitle: databaseTitle(db), missing: names, added: [] };

@@ -11,6 +11,7 @@ import {
 } from './selection.js';
 import { scrapeDouban } from './scraper.js';
 import { collectSubjects, sourceLabel } from './collector.js';
+import { openMappingDialog } from './mapping.js';
 
 // ---------- 节奏控制 ----------
 // 实测约 1.5 秒一个详情页没有触发验证；这里取得更保守，并加随机抖动。
@@ -259,7 +260,7 @@ async function scan() {
       choice: memory[sourceKey(config)] || {},
       existingKeys,
       targetInfo: Object.fromEntries(
-        Object.entries(targets).map(([t, r]) => [t, { how: r.how, dbTitle: r.dbTitle, missing: r.missing, count: r.keys.length }]),
+        Object.entries(targets).map(([t, r]) => [t, { how: r.how, dbTitle: r.dbTitle, missing: r.missing, count: r.keys.length, databaseId: r.databaseId }]),
       ),
       createdAt: Date.now(),
     };
@@ -608,6 +609,16 @@ function targetRow(type) {
   const { text, kind } = targetNote(type);
   note.className = `target-note muted small-text ${kind || ''}`;
   note.textContent = text;
+  // 库已经存在：可以调整字段对应（剧集和电影共用时在电影那一行调）
+  const dbId = job.targetInfo?.[type]?.databaseId;
+  if (dbId && c.kind !== 'same' && c.kind !== 'new' && !job.targetInfo[type].loading) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'text-btn';
+    b.textContent = '字段对应…';
+    b.addEventListener('click', () => editMapping(type, dbId));
+    note.append(' ', b);
+  }
   row.append(note);
   return row;
 }
@@ -626,6 +637,7 @@ function onTargetChange(type, value) {
     next = { kind: 'existing', databaseId: id, title: dbList?.find((d) => d.id === id)?.title || '' };
   }
   job.choice[type] = next;
+  const pickedExisting = next.kind === 'existing';
   // 电影换了库、剧集还在默认库：多半是想放在一起
   if (type === 'movie' && next.kind !== 'default' && choiceOf('tv').kind === 'default' && neededTypes().includes('tv')) {
     job.choice.tv = { kind: 'same' };
@@ -633,7 +645,21 @@ function onTargetChange(type, value) {
   if (type === 'movie' && next.kind === 'default' && prev.kind !== 'default' && choiceOf('tv').kind === 'same') {
     job.choice.tv = { kind: 'default' };
   }
-  refreshTarget(type);
+  refreshTarget(type).then(() => pickedExisting && offerMapping(type));
+}
+
+async function editMapping(type, databaseId) {
+  if (await openMappingDialog({ databaseId, type })) refreshTarget(type);
+}
+
+// 选了一个已有的库、而且还没设过字段对应：直接弹出来让用户对一下
+async function offerMapping(type) {
+  const info = job.targetInfo?.[type];
+  if (!info?.databaseId || info.error) return;
+  const { fieldMaps = {} } = await chrome.storage.local.get('fieldMaps');
+  const id = info.databaseId.replace(/-/g, '');
+  const known = Object.keys(fieldMaps).some((k) => k.replace(/-/g, '') === id);
+  if (!known) editMapping(type, info.databaseId);
 }
 
 // 换了库之后，重新判断哪些条目已经在这个库里
@@ -653,7 +679,7 @@ async function refreshTarget(type) {
       try {
         const r = await bg('listExisting', { type: t, target });
         job.existingKeys[t] = r.keys;
-        job.targetInfo[t] = { how: r.how, dbTitle: r.dbTitle, missing: r.missing, count: r.keys.length };
+        job.targetInfo[t] = { how: r.how, dbTitle: r.dbTitle, missing: r.missing, count: r.keys.length, databaseId: r.databaseId };
       } catch (err) {
         job.existingKeys[t] = [];
         job.targetInfo[t] = { error: err.message };
