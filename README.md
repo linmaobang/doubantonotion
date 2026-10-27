@@ -147,6 +147,7 @@ collector.js   从任意豆瓣列表页收集条目（弹窗和批量导入共�
 writings.js    书评 / 笔记的 HTML → Notion 段落，以及避免重复追加
 douban.js      批量导入：列表数据转换、查重、识别验证页
 selection.js   批量导入：筛选和勾选
+setup.js       还没设置好时，引导到设置页对应的那一栏，并在设置好后回到原处
 autosync.js    自动同步：找出变化、分批处理、状态文字
 offscreen.*    自动同步时解析豆瓣页面的离屏文档
 notion.js      Notion API 客户端，以及字段格式转换

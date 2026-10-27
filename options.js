@@ -4,6 +4,7 @@ import { DEFAULT_STATE, STATE_KEY, describeStatus } from './autosync.js';
 import { parseUserId } from './douban.js';
 import { openMappingDialog } from './mapping.js';
 import { hydrateIcons, icon } from './icons.js';
+import { FIELDS, FOCUS_KEY } from './setup.js';
 
 const $ = (id) => document.getElementById(id);
 const DB_KEYS = ['bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId'];
@@ -117,7 +118,56 @@ function setBanner(kind, text, ready = false) {
   $('banner').className = `banner ${kind}`;
   $('bannerText').textContent = text;
   $('banner').hidden = !text;
-  $('bannerAction').hidden = !ready;
+  // 从别的功能跳过来的：设置好了就给“回去”按钮，否则给“批量导入”
+  $('returnBtn').hidden = !(ready && returnTo);
+  $('bannerAction').hidden = !ready || !!returnTo;
+  if (ready && returnTo) {
+    $('bannerText').textContent = '✓ 设置好了。';
+    $('fromBanner').hidden = true;
+  }
+}
+
+// ---------- 从别的功能跳过来：定位到要填的那一栏 ----------
+
+let returnTo = null; // { tabId, from }
+
+const SECTION = { token: ['secToken', 'notionToken'], page: ['secPage', 'parentPage'], auto: ['autoPanel', 'autoUid'] };
+
+function applyFocus(focus) {
+  if (!focus || Date.now() - focus.at > 5 * 60 * 1000) return;
+  chrome.storage.local.remove(FOCUS_KEY);
+  highlight(focus.field);
+  if (focus.returnTabId) {
+    returnTo = { tabId: focus.returnTabId, from: focus.from };
+    $('returnBtn').textContent = `回到${focus.from || '原来的页面'} →`;
+  }
+  const where = focus.from ? `从「${focus.from}」过来的：` : '';
+  $('fromBanner').textContent = `${where}${FIELDS[focus.field]?.why || ''}填好标亮的地方，${returnTo ? '上面会出现回去的按钮' : '就可以回去继续了'}。`;
+  $('fromBanner').hidden = false;
+}
+
+// 滚到某一栏、闪一下、把光标放进去
+const highlighted = new Set();
+function highlight(field) {
+  const [sectionId, inputId] = SECTION[field] || [];
+  const section = sectionId && $(sectionId);
+  if (!section) return;
+  highlighted.add(field);
+  section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  section.classList.remove('attention');
+  void section.offsetWidth; // 重新触发动画
+  section.classList.add('attention');
+  setTimeout(() => $(inputId)?.focus({ preventScroll: true }), 400);
+}
+
+async function goBack() {
+  try {
+    const tab = await chrome.tabs.update(returnTo.tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+  } catch {
+    // 原来的标签页已经关了
+    if (returnTo.from === '批量导入') chrome.tabs.create({ url: chrome.runtime.getURL('import.html') });
+  }
 }
 
 let checking = 0;
@@ -159,6 +209,8 @@ async function check(apply) {
   if (r.page) line($('pageCheck'), 'success', `✓ 页面「${r.page.title}」`);
   if (!values.parentPageId && !hasDb) {
     setBanner('warn', '第二步：选一个 Notion 页面。');
+    // 从别的功能跳过来、Token 刚填好：接着把用户带到第二步
+    if (returnTo && !highlighted.has('page')) highlight('page');
     return;
   }
 
@@ -286,6 +338,11 @@ async function initOpenMode() {
 async function init() {
   hydrateIcons();
   $('saveBtn').addEventListener('click', saveNow);
+  $('returnBtn').addEventListener('click', goBack);
+  // 设置页已经开着、又从别的功能跳过来时，也要定位
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes[FOCUS_KEY]?.newValue) applyFocus(changes[FOCUS_KEY].newValue);
+  });
   const stored = await chrome.storage.local.get(['notionToken', 'parentPageUrl', 'parentPageId', ...DB_KEYS]);
   $('notionToken').value = stored.notionToken || '';
   $('parentPage').value = stored.parentPageUrl || stored.parentPageId || '';
@@ -313,6 +370,7 @@ async function init() {
     $('toggleToken').textContent = hidden ? '隐藏' : '显示';
   });
 
+  applyFocus((await chrome.storage.local.get(FOCUS_KEY))[FOCUS_KEY]);
   check(false);
   initAuto();
   initOpenMode();

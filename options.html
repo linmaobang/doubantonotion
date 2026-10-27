@@ -12,12 +12,15 @@
       <span class="muted">豆瓣同步到 Notion · 修改会自动保存</span>
     </header>
 
+    <div id="fromBanner" class="from-banner" hidden></div>
+
     <div id="banner" class="banner" hidden>
       <span id="bannerText"></span>
+      <button type="button" id="returnBtn" class="primary" hidden></button>
       <a id="bannerAction" class="primary as-button" href="import.html" hidden>批量导入 →</a>
     </div>
 
-    <section class="panel">
+    <section class="panel" id="secToken">
       <h2><span class="step-num">1</span>连接 Notion</h2>
       <p class="muted">
         在 <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Notion 集成页面</a>
@@ -30,7 +33,7 @@
       <p id="tokenCheck" class="check" hidden></p>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="secPage">
       <h2><span class="step-num">2</span>选一个 Notion 页面</h2>
       <p class="muted">
         随便一个页面就行，空白页也可以。插件会在里面自动建好「我的书库」「我的影院」「我的剧集」；

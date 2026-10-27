@@ -3,6 +3,7 @@ import { collectSubjects } from './collector.js';
 import { STATUS_LABELS, TYPE_LABELS } from './config.js';
 import { STATE_KEY, describeStatus } from './autosync.js';
 import { hydrateIcons } from './icons.js';
+import { FIELDS, fieldForError, missingFrom, onSettingsChange, openSettings } from './setup.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (el, visible = true) => {
@@ -276,11 +277,38 @@ async function onSync() {
     show($('existing'), false);
     renderActions(true);
   } catch (err) {
-    $('result').textContent = err.message;
+    $('result').replaceChildren(err.message);
+    // Token 无效、页面没权限：直接给去设置的按钮
+    const field = fieldForError(err.message);
+    if (field) {
+      const b = document.createElement('button');
+      b.className = 'text-btn';
+      b.textContent = `${FIELDS[field].action} →`;
+      b.addEventListener('click', () => goSettings(field));
+      $('result').append(' ', b);
+    }
     $('result').className = 'result error';
     show($('result'));
     renderActions(!!existingUrl);
   }
+}
+
+// 还没设置好：说清楚缺哪一步，按钮直接带到设置页那一栏
+let setupField = 'token';
+function showSetupNeeded(field) {
+  setupField = field;
+  $('setupTitle').textContent = field === 'token' ? '还差一步：连接 Notion' : '还差一步：选一个 Notion 页面';
+  $('setupText').textContent =
+    field === 'token'
+      ? '先填一个 Notion Token，再选一个 Notion 页面，插件会自动建好数据库。'
+      : 'Token 已经填好了。再选一个 Notion 页面（空白页也行），插件会在里面建好数据库。';
+  $('goSettings').textContent = `${FIELDS[field].action} →`;
+  show($('setupNeeded'));
+}
+
+function goSettings(field) {
+  openSettings(field, { from: '豆瓣页面', returnTabId: currentTab?.id ?? null });
+  if (!IS_PANEL) window.close();
 }
 
 async function initSubject(tab, seq) {
@@ -310,8 +338,9 @@ async function initSubject(tab, seq) {
 
   const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
   if (seq !== renderSeq) return;
-  if (!settings.notionToken || !(settings.parentPageId || settings[`${info.type}DatabaseId`])) {
-    show($('setupNeeded'));
+  const missing = missingFrom(settings, [info.type]);
+  if (missing) {
+    showSetupNeeded(missing);
     return;
   }
   renderActions(false);
@@ -376,7 +405,7 @@ async function renderAutoFooter() {
     show($('autoAction'));
   } else if (kind === 'error') {
     $('autoAction').textContent = '去设置';
-    $('autoAction').onclick = () => chrome.runtime.openOptionsPage();
+    $('autoAction').onclick = () => goSettings('auto');
     show($('autoAction'));
   }
 }
@@ -435,7 +464,7 @@ async function followTabs() {
 
 function setupOnce() {
   $('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
-  $('goSettings').addEventListener('click', () => chrome.runtime.openOptionsPage());
+  $('goSettings').addEventListener('click', () => goSettings(setupField));
   $('openImport').addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('import.html') }));
   $('importPage').addEventListener('click', importCurrentList);
   $('sync').addEventListener('click', onSync);
@@ -487,6 +516,10 @@ async function init() {
   render(tab, { force: true });
   if (IS_PANEL) {
     followTabs();
+    // 侧边栏一直开着：在设置页填好后，这里自动刷新
+    onSettingsChange(() => {
+      if (!$('setupNeeded').hidden && currentTab) render(currentTab, { force: true });
+    });
     // 侧边栏一直开着：自动同步的状态变了就更新底栏
     chrome.storage.onChanged.addListener((changes) => {
       if (changes[STATE_KEY]) renderAutoFooter();

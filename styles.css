@@ -737,3 +737,31 @@ a.with-icon { display: flex; align-items: center; justify-content: center; }
   box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.05);
 }
 .save-bar .primary { width: auto; padding: 8px 24px; display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- 引导去设置 ---------- */
+.from-banner {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+.panel.attention { animation: attention 2.4s ease-out; }
+@keyframes attention {
+  0%, 30% { box-shadow: 0 0 0 3px var(--accent); border-color: var(--accent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.banner #returnBtn { width: auto; padding: 7px 16px; white-space: nowrap; }
+.setup-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--radius);
+}
+.setup-callout p:first-child { font-weight: 600; }
+.setup-callout .primary { align-self: flex-start; width: auto; padding: 8px 18px; }
+.setup-callout.ok { border-color: var(--success); border-style: solid; }
+.setup-callout.ok p:first-child { color: var(--success); }
+@media (prefers-reduced-motion: reduce) { .panel.attention { animation: none; outline: 3px solid var(--accent); } }

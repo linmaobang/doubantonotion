@@ -13,6 +13,7 @@ import { scrapeDouban } from './scraper.js';
 import { collectNotes, collectSubjects, parseNote, sourceLabel } from './collector.js';
 import { openMappingDialog } from './mapping.js';
 import { icon } from './icons.js';
+import { fieldForError, missingFrom, onSettingsChange, setupCallout } from './setup.js';
 
 // ---------- 节奏控制 ----------
 // 实测约 1.5 秒一个详情页没有触发验证；这里取得更保守，并加随机抖动。
@@ -272,10 +273,9 @@ async function scan() {
   if (problem) return scanStatus(problem, 'error');
 
   const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
-  if (!settings.notionToken) return scanStatus('还没有填写 Notion Token，请先到设置页完成设置。', 'error');
-  if (!settings.parentPageId && !settings.bookDatabaseId && !settings.movieDatabaseId && !settings.tvDatabaseId) {
-    return scanStatus('还没有选择 Notion 页面，请先到设置页填一个页面链接。', 'error');
-  }
+  const missing = missingFrom(settings);
+  if (missing) return showSetup($('setupBox'), missing, scan, '继续读取列表');
+  hideSetup($('setupBox'));
 
   $('scanBtn').disabled = true;
   try {
@@ -329,9 +329,58 @@ async function scan() {
     scanStatus('');
     showReview();
   } catch (err) {
-    scanStatus(scanError(err), 'error');
+    const field = fieldForError(err.message);
+    if (field) {
+      scanStatus('');
+      showSetup($('setupBox'), field, scan, '继续读取列表', err.message);
+    } else {
+      scanStatus(scanError(err), 'error');
+    }
   } finally {
     $('scanBtn').disabled = false;
+  }
+}
+
+// ---------- 还没设置好：直接带去设置页 ----------
+
+let myTabId = null;
+chrome.tabs?.getCurrent?.().then((t) => (myTabId = t?.id ?? null));
+
+// 显示“还差一步”；设置改好后自动变成“设置好了 + 继续”按钮
+function showSetup(box, field, resume, resumeLabel, message = '') {
+  box.replaceChildren(setupCallout(field, { from: '批量导入', returnTabId: myTabId, message }));
+  box.hidden = false;
+  box.dataset.waiting = field;
+  box._resume = resume;
+  box._resumeLabel = resumeLabel;
+}
+
+function hideSetup(box) {
+  box.hidden = true;
+  delete box.dataset.waiting;
+}
+
+async function recheckSetup() {
+  const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
+  for (const box of [$('setupBox'), $('runSetupBox')]) {
+    if (!box.dataset.waiting) continue;
+    // 只有“缺 Token / 缺页面”能这样直接判断；Token 无效这类，等用户改了设置就让他再试一次
+    if (missingFrom(settings)) continue;
+    delete box.dataset.waiting;
+    const done = document.createElement('div');
+    done.className = 'setup-callout ok';
+    const text = document.createElement('p');
+    text.textContent = '✓ 设置好了。';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'primary';
+    btn.textContent = box._resumeLabel;
+    btn.addEventListener('click', () => {
+      hideSetup(box);
+      box._resume();
+    });
+    done.append(text, btn);
+    box.replaceChildren(done);
   }
 }
 
@@ -1011,9 +1060,12 @@ async function run() {
       job.failures.push({ info: item, error: err.message });
       log(`失败：${item.title}（${err.message}）`, 'error');
       // Token 失效、数据库无权限这类错误，后面的也一定失败，直接停
-      if (/Token 无效|找不到这个数据库/.test(err.message)) {
+      const field = fieldForError(err.message);
+      if (field) {
+        // 这条算失败，暂停，带用户去设置；设置好之后从下一条继续
         pauseRequested = true;
         job.next++;
+        showSetup($('runSetupBox'), field, () => run(), '继续导入', err.message);
         break;
       }
     }
@@ -1115,6 +1167,7 @@ async function detectMe(byUser) {
 }
 
 async function init() {
+  onSettingsChange(recheckSetup);
   for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => setMode(tab.dataset.mode));
   $('pageUrl').addEventListener('input', () => {
     $('preloadNote').hidden = !preload || !samePage(preload.url, $('pageUrl').value.trim());
