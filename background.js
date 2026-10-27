@@ -45,6 +45,19 @@ async function ensureRefererRule() {
 chrome.runtime.onInstalled.addListener(ensureRefererRule);
 chrome.runtime.onStartup.addListener(ensureRefererRule);
 
+// ---------- 点插件图标时：弹出小窗还是打开侧边栏 ----------
+async function applyOpenMode() {
+  const { openMode = 'popup' } = await chrome.storage.local.get('openMode');
+  const panel = openMode === 'panel';
+  await chrome.action.setPopup({ popup: panel ? '' : 'popup.html' });
+  await chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: panel });
+}
+chrome.runtime.onInstalled.addListener(applyOpenMode);
+chrome.runtime.onStartup.addListener(applyOpenMode);
+chrome.storage.onChanged.addListener((changes) => {
+  if ('openMode' in changes) applyOpenMode();
+});
+
 // 换成大图：s/m_ratio_poster → l_ratio_poster，subject/s 或 m → subject/l
 function largeCover(url) {
   return url.replace(/\/[sm]_ratio_poster\//, '/l_ratio_poster/').replace(/\/subject\/[sm]\//, '/subject/l/');

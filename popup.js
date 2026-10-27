@@ -17,6 +17,13 @@ let existingUrl = null;
 let target = { kind: 'default' }; // 这次保存写进哪个库；每次打开弹窗都从默认库开始
 let defaultDbTitle = '';
 let dbList = null;
+let currentList = null; // 列表页读到的条目
+let currentTab = null; // 正在显示的标签页
+let renderedUrl = ''; // 已经读过的地址：没变就不重读，免得打断正在进行的操作
+let renderSeq = 0; // 页面切得快时，只认最后一次读取的结果
+
+// 侧边栏和弹窗共用这份代码；侧边栏一直开着，要跟着页面变化
+const IS_PANEL = document.body.classList.contains('panel');
 
 async function callBackground(action, payload = {}) {
   const res = await chrome.runtime.sendMessage({ action, ...payload });
@@ -273,15 +280,17 @@ async function onSync() {
   }
 }
 
-async function initSubject(tab) {
+async function initSubject(tab, seq) {
+  let result;
   try {
-    const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: scrapeDouban });
+    [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: scrapeDouban });
     if (!result || result.error) throw new Error(result?.error || '读取页面失败');
-    info = result;
   } catch (err) {
-    showEmpty(`读取页面失败：${err.message}。可以刷新豆瓣页面后再试。`);
+    if (seq === renderSeq) showEmpty(`读取页面失败：${err.message}。可以刷新豆瓣页面后再试。`);
     return;
   }
+  if (seq !== renderSeq) return;
+  info = result;
 
   // 你在豆瓣上已经标记过的，直接带过来
   mark = info.mark || '';
@@ -297,6 +306,7 @@ async function initSubject(tab) {
   showOnly('subject');
 
   const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
+  if (seq !== renderSeq) return;
   if (!settings.notionToken || !(settings.parentPageId || settings[`${info.type}DatabaseId`])) {
     show($('setupNeeded'));
     return;
@@ -307,15 +317,17 @@ async function initSubject(tab) {
 
 // ---------- 列表页 ----------
 
-async function initListPage(tab) {
+async function initListPage(tab, seq) {
   let list;
   try {
     const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collectSubjects });
     list = result;
   } catch (err) {
-    showEmpty(`读取页面失败：${err.message}`);
+    if (seq === renderSeq) showEmpty(`读取页面失败：${err.message}`);
     return;
   }
+  if (seq !== renderSeq) return;
+  currentList = list;
   if (!list?.items.length) {
     showEmpty('这个页面上没有找到图书或影视条目。打开一本书、一部电影，或者一个豆列、标签页、Top250 再试试。');
     return;
@@ -326,22 +338,30 @@ async function initListPage(tab) {
   const parts = [books && `图书 ${books}`, screen && `影视 ${screen}`].filter(Boolean).join('，');
   $('listMeta').textContent = `这一页 ${list.items.length} 个条目（${parts}）${list.next ? ` · 共 ${list.totalPages} 页` : ''}`;
   if (list.hasLoadMore) {
-    $('listHint').textContent = '这个页面是滚动加载的，只能导入已经显示出来的条目。想要更多，先在页面上点几次「加载更多」，再打开我。';
+    $('listHint').textContent = IS_PANEL
+      ? '这个页面是滚动加载的，只能导入已经显示出来的条目。想要更多，先在页面上点几次「加载更多」，再点右上角的 ↻ 重新读取。'
+      : '这个页面是滚动加载的，只能导入已经显示出来的条目。想要更多，先在页面上点几次「加载更多」，再打开我。';
     show($('listHint'));
   }
   showOnly('list');
-  $('importPage').addEventListener('click', async () => {
-    await chrome.storage.local.set({ pendingPage: { ...list, at: Date.now() } });
-    await chrome.tabs.create({ url: chrome.runtime.getURL('import.html') });
-    window.close();
-  });
+}
+
+async function importCurrentList() {
+  if (!currentList) return;
+  await chrome.storage.local.set({ pendingPage: { ...currentList, at: Date.now() } });
+  await chrome.tabs.create({ url: chrome.runtime.getURL('import.html') });
+  if (!IS_PANEL) window.close();
 }
 
 // ---------- 自动同步状态 ----------
 
 async function renderAutoFooter() {
   const state = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
-  if (!state?.enabled) return;
+  show($('autoAction'), false);
+  if (!state?.enabled) {
+    show($('autoFooter'), false);
+    return;
+  }
   const { short, text, kind, needsDouban } = describeStatus(state);
   $('autoText').textContent = short;
   $('autoFooter').title = text;
@@ -358,12 +378,63 @@ async function renderAutoFooter() {
   }
 }
 
+// ---------- 读取当前页面 ----------
+
+// 换页面时把上一页留下的状态清干净
+function resetView() {
+  info = null;
+  mark = '';
+  stars = 0;
+  markedOnDouban = false;
+  saved = null;
+  existingUrl = null;
+  target = { kind: 'default' };
+  currentList = null;
+  $('newDbName').value = '';
+  for (const id of ['result', 'existing', 'targetPicker', 'newDbName', 'setupNeeded', 'sync', 'openNotion', 'markedFrom', 'listHint']) {
+    show($(id), false);
+  }
+}
+
+async function render(tab, { force = false } = {}) {
+  const url = tab?.url || '';
+  if (!force && tab?.id === currentTab?.id && url === renderedUrl) return;
+  currentTab = tab;
+  renderedUrl = url;
+  const seq = ++renderSeq;
+  resetView();
+  showOnly('loading');
+  if (/^https:\/\/(book|movie)\.douban\.com\/subject\/\d+/.test(url)) return initSubject(tab, seq);
+  if (/^https:\/\/(www|book|movie)\.douban\.com\//.test(url)) return initListPage(tab, seq);
+  showEmpty(
+    IS_PANEL
+      ? '打开豆瓣的书、电影、剧集页面，这里会显示它，可以一键保存；打开豆列、标签、Top250 这类列表页，可以批量导入。'
+      : '在豆瓣的书、电影、剧集页面打开我，可以一键保存；在豆列、标签、Top250 这类列表页打开我，可以批量导入。',
+  );
+}
+
+// 侧边栏：跟着切标签页、跟着页面跳转
+async function followTabs() {
+  const win = await chrome.windows.getCurrent();
+  chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+    if (windowId !== win.id) return;
+    render(await chrome.tabs.get(tabId));
+  });
+  chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+    if (tabId !== currentTab?.id) return;
+    // 页面加载完再读；只有地址变了才重读（同一页里的刷新不打断你）
+    if (change.status === 'complete' && tab.url !== renderedUrl) render(tab);
+    else if (change.url && change.url !== renderedUrl) showOnly('loading');
+  });
+}
+
 // ---------- 入口 ----------
 
-async function init() {
+function setupOnce() {
   $('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('goSettings').addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('openImport').addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('import.html') }));
+  $('importPage').addEventListener('click', importCurrentList);
   $('sync').addEventListener('click', onSync);
   $('targetSelect').addEventListener('change', onTargetSelect);
   $('newDbName').addEventListener('input', () => {
@@ -382,12 +453,41 @@ async function init() {
     });
   }
 
+  if (IS_PANEL) {
+    // 侧边栏：手动重新读取（比如“加载更多”之后）
+    show($('refresh'));
+    $('refresh').addEventListener('click', async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      render(tab, { force: true });
+    });
+  } else {
+    // 弹窗：一键固定到侧边栏。sidePanel.open 必须在点击里同步调用
+    show($('pinPanel'));
+    $('pinPanel').addEventListener('click', () => {
+      chrome.sidePanel
+        .open({ windowId: currentTab.windowId })
+        .then(() => chrome.storage.local.set({ openMode: 'panel' }))
+        .then(() => window.close())
+        .catch((err) => {
+          $('emptyText').textContent = `打不开侧边栏：${err.message}（需要 Chrome 116 或更新的版本）`;
+          showOnly('empty');
+        });
+    });
+  }
+}
+
+async function init() {
+  setupOnce();
   renderAutoFooter();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = tab?.url || '';
-  if (/^https:\/\/(book|movie)\.douban\.com\/subject\/\d+/.test(url)) return initSubject(tab);
-  if (/^https:\/\/(www|book|movie)\.douban\.com\//.test(url)) return initListPage(tab);
-  showEmpty('在豆瓣的书、电影、剧集页面打开我，可以一键保存；在豆列、标签、Top250 这类列表页打开我，可以批量导入。');
+  render(tab, { force: true });
+  if (IS_PANEL) {
+    followTabs();
+    // 侧边栏一直开着：自动同步的状态变了就更新底栏
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes[STATE_KEY]) renderAutoFooter();
+    });
+  }
 }
 
 init();

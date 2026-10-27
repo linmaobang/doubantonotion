@@ -91,6 +91,20 @@
     </section>
 
     <section class="panel">
+      <h2>插件界面</h2>
+      <fieldset class="checks column">
+        <legend class="sr-only">点插件图标时打开</legend>
+        <label><input type="radio" name="openMode" value="popup"> 弹出小窗：点一下打开，点别处就关掉</label>
+        <label><input type="radio" name="openMode" value="panel"> 侧边栏：固定在浏览器一侧，不挡页面；切换标签页、打开另一本书时自动跟着变</label>
+      </fieldset>
+      <div class="auto-status-row">
+        <p class="muted small-text">侧边栏放在左边还是右边，由 Chrome 的「外观 → 侧边栏位置」决定。</p>
+        <button type="button" id="openChromeAppearance" class="secondary">打开 Chrome 外观设置</button>
+      </div>
+      <p id="openModeHint" class="check" hidden></p>
+    </section>
+
+    <section class="panel">
       <details id="advanced">
         <summary>已有数据库（可选）</summary>
         <p class="muted">

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!-- 侧边栏：和 popup.html 内容一样，只是 body 多了 panel。改 popup.html 时同步改这里（有测试检查）。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>豆瓣同步到 Notion · 侧边栏</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="popup panel">
+  <header class="bar">
+    <h1>豆瓣 → Notion</h1>
+    <div class="bar-links">
+      <button id="openImport" class="text-btn">批量导入</button>
+      <button id="pinPanel" class="icon-btn" title="固定到侧边栏：不挡页面，切换页面时自动跟着变" aria-label="固定到侧边栏" hidden>📌</button>
+      <button id="refresh" class="icon-btn" title="重新读取当前页面" aria-label="重新读取当前页面" hidden>↻</button>
+      <button id="openOptions" class="icon-btn" title="设置" aria-label="设置">⚙</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 读取中 -->
+    <div id="loading" class="skeleton" aria-label="正在读取页面">
+      <div class="sk-cover"></div>
+      <div class="sk-lines"><div></div><div></div><div></div></div>
+    </div>
+
+    <!-- 空状态：不是豆瓣页面 / 页面里没有条目 / 出错 -->
+    <section id="empty" class="empty" hidden>
+      <p id="emptyText"></p>
+      <div class="empty-links">
+        <a class="secondary as-button" href="https://book.douban.com/" target="_blank" rel="noopener">📚 豆瓣读书</a>
+        <a class="secondary as-button" href="https://movie.douban.com/" target="_blank" rel="noopener">🎬 豆瓣电影</a>
+      </div>
+    </section>
+
+    <!-- 单个条目 -->
+    <section id="subject" class="stack" hidden>
+      <div class="card">
+        <img id="cover" class="cover" alt="">
+        <div class="card-body">
+          <h2 id="title"></h2>
+          <p id="subtitle" class="muted"></p>
+          <p id="meta" class="meta"></p>
+          <div id="typeSwitch" class="segmented small" role="radiogroup" aria-label="保存为" hidden>
+            <button type="button" role="radio" data-type="movie">电影</button>
+            <button type="button" role="radio" data-type="tv">剧集</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mine">
+        <div class="mine-row">
+          <span class="mine-label">我的标记</span>
+          <div id="statusSwitch" class="segmented" role="radiogroup" aria-label="我的标记"></div>
+        </div>
+        <div id="ratingRow" class="mine-row" hidden>
+          <span class="mine-label">我的评分</span>
+          <div id="stars" class="stars" role="radiogroup" aria-label="我的评分"></div>
+        </div>
+        <p id="markedFrom" class="muted small-text" hidden></p>
+      </div>
+
+      <p id="existing" class="hint" hidden></p>
+      <div id="targetPicker" class="target-picker" hidden>
+        <select id="targetSelect" aria-label="保存到哪个数据库"></select>
+        <input id="newDbName" type="text" placeholder="新数据库的名字" aria-label="新数据库的名字" hidden>
+      </div>
+
+      <div id="setupNeeded" class="setup-box" hidden>
+        <strong>还差一步：连接 Notion</strong>
+        <p class="muted">填一个 Notion Token，再选一个 Notion 页面，插件会自动建好数据库。</p>
+        <button id="goSettings" class="primary">去设置</button>
+      </div>
+
+      <button id="sync" class="primary" hidden>保存到 Notion</button>
+      <a id="openNotion" class="primary as-button" target="_blank" rel="noopener" hidden>在 Notion 中打开 ↗</a>
+      <p id="result" class="result" hidden></p>
+    </section>
+
+    <!-- 列表页 -->
+    <section id="list" class="stack" hidden>
+      <div class="card list-card">
+        <div class="card-body">
+          <h2 id="listName"></h2>
+          <p id="listMeta" class="muted"></p>
+        </div>
+      </div>
+      <p id="listHint" class="hint" hidden></p>
+      <button id="importPage" class="primary">挑选并导入这个列表</button>
+    </section>
+  </main>
+
+  <footer id="autoFooter" class="auto-footer" hidden>
+    <span>🔄</span>
+    <span id="autoText"></span>
+    <button id="autoAction" class="text-btn" hidden></button>
+  </footer>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

@@ -245,6 +245,23 @@ async function initAuto() {
   });
 }
 
+// ---------- 插件界面 ----------
+
+async function initOpenMode() {
+  const { openMode = 'popup' } = await chrome.storage.local.get('openMode');
+  for (const r of document.querySelectorAll('input[name="openMode"]')) {
+    r.checked = r.value === openMode;
+    r.addEventListener('change', async () => {
+      await chrome.storage.local.set({ openMode: r.value });
+      $('openModeHint').textContent =
+        r.value === 'panel' ? '✓ 已改好。之后点插件图标会打开侧边栏。' : '✓ 已改好。之后点插件图标会弹出小窗。';
+      $('openModeHint').className = 'check success';
+      $('openModeHint').hidden = false;
+    });
+  }
+  $('openChromeAppearance').addEventListener('click', () => chrome.tabs.create({ url: 'chrome://settings/appearance' }));
+}
+
 // ---------- 入口 ----------
 
 async function init() {
@@ -277,6 +294,7 @@ async function init() {
 
   check(false);
   initAuto();
+  initOpenMode();
 }
 
 init();

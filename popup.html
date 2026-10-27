@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>豆瓣同步到 Notion</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -10,6 +11,8 @@
     <h1>豆瓣 → Notion</h1>
     <div class="bar-links">
       <button id="openImport" class="text-btn">批量导入</button>
+      <button id="pinPanel" class="icon-btn" title="固定到侧边栏：不挡页面，切换页面时自动跟着变" aria-label="固定到侧边栏" hidden>📌</button>
+      <button id="refresh" class="icon-btn" title="重新读取当前页面" aria-label="重新读取当前页面" hidden>↻</button>
       <button id="openOptions" class="icon-btn" title="设置" aria-label="设置">⚙</button>
     </div>
   </header>

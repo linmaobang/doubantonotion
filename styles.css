@@ -642,3 +642,11 @@ details .db-row { border-top: none; padding-top: 4px; }
   padding: 4px 0;
 }
 .target-note .chip-btn { margin-left: 6px; vertical-align: 1px; }
+
+/* ---------- 侧边栏 ---------- */
+body.popup.panel { width: auto; min-width: 280px; }
+body.panel .bar { position: sticky; top: 0; z-index: 1; background: var(--bg); }
+body.panel .cover { width: 88px; height: 126px; }
+body.panel .auto-footer { position: sticky; bottom: 0; background: var(--bg); }
+.icon-btn[hidden] { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
