@@ -1,6 +1,7 @@
 # 豆瓣同步到 Notion
 
 一个 Chrome 扩展：把豆瓣上的图书、电影、剧集——连同封面、简介，以及你自己的状态、评分、短评、书评和读书笔记——保存到 Notion 数据库。可以一条一条存，也可以批量导入，还可以定时自动同步。
+<img width="905" height="401" alt="image" src="https://github.com/user-attachments/assets/3b58cede-521a-4160-b392-aad539564212" />
 
 ## 能做什么
 
