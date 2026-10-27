@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { missingFields, pickChildDatabase, resolveDatabase } from '../databases.js';
+import { missingFields, pickChildDatabase, resolveChosen, resolveDatabase } from '../databases.js';
 import { NotionError } from '../notion.js';
 import { SCHEMAS } from '../config.js';
 
@@ -110,4 +110,51 @@ test('pickChildDatabase 只认对应类型的名字', () => {
   const blocks = [{ id: 'a', type: 'child_database', child_database: { title: '我的影院' } }];
   assert.equal(pickChildDatabase(blocks, 'book'), null);
   assert.equal(pickChildDatabase(blocks, 'movie').id, 'a');
+});
+
+// ---------- 用户自己选的库 ----------
+
+test('选默认：和原来的自动规则一样', async () => {
+  const client = fakeClient();
+  const r = await resolveChosen(client, { parentPageId: PAGE }, 'book', { kind: 'default' });
+  assert.equal(r.how, 'created');
+  assert.deepEqual(client.calls.at(-1), ['createDatabase', PAGE, '我的书库']);
+});
+
+test('选已有库：只补缺的字段，不新建', async () => {
+  const client = fakeClient({ databases: { [OTHER]: { title: title('Top250 书单'), properties: { Name: { type: 'title' }, 评分: { type: 'number' } } } } });
+  const r = await resolveChosen(client, { parentPageId: PAGE }, 'book', { kind: 'existing', databaseId: OTHER });
+  assert.equal(r.how, 'chosen');
+  assert.equal(r.dbTitle, 'Top250 书单');
+  assert.ok(r.added.includes('作者'));
+  assert.ok(!r.added.includes('评分'));
+  assert.ok(!client.calls.some(([c]) => c === 'createDatabase'));
+});
+
+test('选已有库，预览模式：只列出会补的字段', async () => {
+  const client = fakeClient({ databases: { [OTHER]: { title: title('x'), properties: { Name: { type: 'title' } } } } });
+  const r = await resolveChosen(client, {}, 'movie', { kind: 'existing', databaseId: OTHER }, { create: false });
+  assert.ok(r.missing.includes('导演'));
+  assert.equal(client.calls.length, 0);
+});
+
+test('新建库：用给的名字，建在设置的页面里', async () => {
+  const client = fakeClient();
+  const preview = await resolveChosen(client, { parentPageId: PAGE }, 'book', { kind: 'new', title: '豆列：五颗星' }, { create: false });
+  assert.equal(preview.how, 'create');
+  assert.equal(preview.dbTitle, '豆列：五颗星');
+  assert.equal(client.calls.length, 0, '预览不建库');
+  const r = await resolveChosen(client, { parentPageId: PAGE }, 'book', { kind: 'new', title: '豆列：五颗星' });
+  assert.equal(r.how, 'created');
+  assert.deepEqual(client.calls.at(-1), ['createDatabase', PAGE, '豆列：五颗星']);
+});
+
+test('新建库但没设置页面：说清楚原因', async () => {
+  await assert.rejects(resolveChosen(fakeClient(), {}, 'book', { kind: 'new', title: 'x' }), /先在设置页选一个 Notion 页面/);
+});
+
+test('名字留空时用默认名', async () => {
+  const client = fakeClient();
+  await resolveChosen(client, { parentPageId: PAGE }, 'tv', { kind: 'new', title: '  ' });
+  assert.deepEqual(client.calls.at(-1), ['createDatabase', PAGE, '我的剧集']);
 });

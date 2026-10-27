@@ -512,3 +512,32 @@ details .db-row { border-top: none; padding-top: 4px; }
 .done-box p { font-weight: 600; color: var(--success); }
 .db-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .db-links a { padding: 6px 12px; }
+
+/* ---------- 写进哪个数据库 ---------- */
+.target-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.target-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.target-rows { display: flex; flex-direction: column; gap: 10px; }
+.target-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 8px;
+}
+.target-row select { min-width: 0; }
+.target-row .target-note { grid-column: 2 / -1; }
+.target-row .target-note.error { color: var(--error); }
+.target-label { font-weight: 600; font-size: 13px; }
+@media (max-width: 560px) {
+  .target-row { grid-template-columns: 1fr; }
+  .target-row .target-note { grid-column: auto; }
+}
+.target-picker { display: flex; flex-direction: column; gap: 6px; }
+.hint .text-btn { padding: 0 2px; text-decoration: underline; font-size: 12px; }

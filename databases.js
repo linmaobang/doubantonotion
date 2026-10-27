@@ -95,3 +95,45 @@ export async function resolveDatabase(client, settings, type, { create = true } 
   db = await client.updateDatabase(db.id, { properties: missing });
   return { how, databaseId: db.id, db, dbTitle: databaseTitle(db), missing: [], added: names };
 }
+
+// ---------- 用户自己选的目标库 ----------
+// target 的几种写法：
+//   { kind: 'default' }                 设置里的默认库（按上面的规则自动找 / 建）
+//   { kind: 'existing', databaseId }    一个已有的库：只补缺少的字段，不改已有字段
+//   { kind: 'new', title }              在设置里选的页面下新建一个库
+
+export function schemaWithTitle(type, title) {
+  return { ...SCHEMAS[type], title: [{ type: 'text', text: { content: String(title).slice(0, 200) } }] };
+}
+
+export function defaultTitle(type) {
+  return SCHEMAS[type].title[0].text.content;
+}
+
+export async function resolveChosen(client, settings, type, target, { create = true } = {}) {
+  const kind = target?.kind || 'default';
+  if (kind === 'default') return resolveDatabase(client, settings, type, { create });
+
+  if (kind === 'existing') {
+    let db = await client.getDatabase(normalizeId(target.databaseId));
+    if (db.archived || db.in_trash) throw new Error(`数据库「${databaseTitle(db)}」已经被删除了，请换一个。`);
+    const missing = missingFields(db.properties, type);
+    const names = Object.keys(missing);
+    if (!create || names.length === 0) {
+      return { how: 'chosen', databaseId: db.id, db, dbTitle: databaseTitle(db), missing: names, added: [] };
+    }
+    db = await client.updateDatabase(db.id, { properties: missing });
+    return { how: 'chosen', databaseId: db.id, db, dbTitle: databaseTitle(db), missing: [], added: names };
+  }
+
+  if (kind === 'new') {
+    const pageId = normalizeId(settings.parentPageId);
+    if (!pageId) throw new Error('新建数据库需要先在设置页选一个 Notion 页面，新库会建在那个页面里。');
+    const title = String(target.title || '').trim() || defaultTitle(type);
+    if (!create) return { how: 'create', databaseId: null, dbTitle: title, missing: [], added: [] };
+    const db = await client.createDatabase(pageId, schemaWithTitle(type, title));
+    return { how: 'created', databaseId: db.id, db, dbTitle: databaseTitle(db), missing: [], added: [] };
+  }
+
+  throw new Error(`不认识的目标数据库：${kind}`);
+}

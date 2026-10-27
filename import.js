@@ -21,6 +21,7 @@ const BLOCK_BACKOFF_MS = [60 * 1000, 3 * 60 * 1000]; // 被拦后的等待时间
 const PAGE_SIZE = 50;
 const HTML_PAGE_GAP_MS = 2000; // 列表页（豆列、标签……）两次请求之间
 const PENDING_KEY = 'pendingPage'; // 弹窗交过来的“当前页面”数据
+const MEMORY_KEY = 'targetMemory'; // 每个来源上次选的数据库
 const JOB_KEY = 'importJob';
 
 const $ = (id) => document.getElementById(id);
@@ -226,17 +227,18 @@ async function scan() {
       if (i.type === 'book') needTypes.add('book');
       else needTypes.add('movie').add('tv'); // 电影域名下的条目可能是剧集
     }
-    const existing = new Set();
     const targets = {};
+    const existingKeys = {};
     for (const type of needTypes) {
       const r = await bg('listExisting', { type });
       targets[type] = r;
-      r.keys.forEach((k) => existing.add(k));
+      existingKeys[type] = r.keys;
     }
     for (const item of items) {
       item.key = subjectKey(item.url);
-      item.exists = existing.has(item.key);
+      item.exists = typesOf(item).some((t) => (existingKeys[t] || []).includes(item.key));
     }
+    const memory = (await chrome.storage.local.get(MEMORY_KEY))[MEMORY_KEY] || {};
 
     job = {
       config,
@@ -250,7 +252,14 @@ async function scan() {
       stats: { created: 0, updated: 0, failed: 0 },
       failures: [],
       noDedupe: Object.entries(targets).filter(([, r]) => !r.canDedupe).map(([t]) => t),
+      // 默认库的情况（用于“默认”选项的名字）
       targets: Object.fromEntries(Object.entries(targets).map(([t, r]) => [t, { how: r.how, dbTitle: r.dbTitle, missing: r.missing }])),
+      // 用户为每种类型选的库；先用这个来源上次的选择
+      choice: memory[sourceKey(config)] || {},
+      existingKeys,
+      targetInfo: Object.fromEntries(
+        Object.entries(targets).map(([t, r]) => [t, { how: r.how, dbTitle: r.dbTitle, missing: r.missing, count: r.keys.length }]),
+      ),
       createdAt: Date.now(),
     };
     await saveJob();
@@ -436,19 +445,6 @@ function renderSelection() {
     ? `已选 ${total} 条（${parts.join('，')}），${minutes(total)}`
     : '还没有选择条目';
   $('startBtn').disabled = total === 0;
-
-  // 每类条目会写进哪个数据库（只说选中的类型）
-  const used = new Set(job.all.filter((i) => selected.has(i.key)).map((i) => i.type));
-  const targetLines = Object.entries(job.targets || {})
-    .filter(([t]) => used.has(t))
-    .map(([t, r]) => {
-      const head = `${TYPE_LABELS[t]}会写进`;
-      if (r.how === 'create') return `${head}自动新建的「${r.dbTitle}」。`;
-      const extra = r.missing.length ? `，并补上缺少的字段：${r.missing.join('、')}` : '';
-      return `${head}「${r.dbTitle}」${extra}。`;
-    });
-  $('targets').replaceChildren(...targetLines.map(li));
-  $('targets').hidden = targetLines.length === 0;
 }
 
 function setVisible(checked) {
@@ -480,12 +476,260 @@ function showReview() {
 
   buildFilters();
   renderList();
+  job.choice = job.choice || {};
+  job.targetInfo = job.targetInfo || {};
+  job.existingKeys = job.existingKeys || {};
+  renderTargets();
+  loadDbList().then(renderTargets);
+  // 上次为这个来源选过别的库：按那个库重新判断“已在 Notion”
+  for (const type of neededTypes()) {
+    const c = job.choice[type];
+    if (c && c.kind !== 'default' && !(type === 'tv' && c.kind === 'same' && !job.choice.movie)) refreshTarget(type);
+  }
+}
+
+// ---------- 写进哪个数据库 ----------
+
+let dbList = null; // 插件能访问的数据库
+
+async function loadDbList() {
+  if (dbList) return dbList;
+  try {
+    dbList = await bg('listDatabases');
+  } catch {
+    dbList = [];
+  }
+  return dbList;
+}
+
+// 一个条目可能写进的类型：从列表页来的影视还分不清电影/剧集，两个都算
+function typesOf(item) {
+  if (item.type === 'book') return ['book'];
+  return item.typeGuess ? ['movie', 'tv'] : [item.type];
+}
+
+function neededTypes() {
+  const set = new Set(job.all.flatMap(typesOf));
+  return ['book', 'movie', 'tv'].filter((t) => set.has(t));
+}
+
+function choiceOf(type) {
+  return job.choice?.[type] || { kind: 'default' };
+}
+
+// “和电影用同一个库”展开成电影的选择
+function effectiveChoice(type) {
+  const c = choiceOf(type);
+  return c.kind === 'same' ? choiceOf('movie') : c;
+}
+
+function sourceKey(config) {
+  if (config.mode === 'mine') return `mine:${config.uid}`;
+  try {
+    const u = new URL(config.pageUrl);
+    return `page:${u.host}${u.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return `page:${config.pageUrl}`;
+  }
+}
+
+function suggestedTitle(type) {
+  const source = job.all.find((i) => i.source)?.source;
+  if (source) return type === 'tv' && job.choice?.movie ? `${source}（剧集）` : source;
+  return `豆瓣${TYPE_LABELS[type]}`;
+}
+
+function targetNote(type) {
+  const c = choiceOf(type);
+  if (c.kind === 'same') return { text: '和电影写进同一个库（会补上剧集特有的字段）。' };
+  const info = job.targetInfo?.[type];
+  if (!info) return { text: '' };
+  if (info.loading) return { text: '正在检查…' };
+  if (info.error) return { text: info.error, kind: 'error' };
+  if (c.kind === 'new' || info.how === 'create') {
+    return { text: `开始导入时会新建「${c.kind === 'new' ? c.title || suggestedTitle(type) : info.dbTitle}」。` };
+  }
+  const parts = [`「${info.dbTitle || c.title || '这个库'}」里已有 ${info.count || 0} 条`];
+  if (info.missing?.length) {
+    const list = info.missing.length > 5 ? `${info.missing.slice(0, 5).join('、')} 等 ${info.missing.length} 个` : info.missing.join('、');
+    parts.push(`会补上 ${list} 字段`);
+  }
+  return { text: `${parts.join('，')}。` };
+}
+
+function targetRow(type) {
+  const c = choiceOf(type);
+  const row = document.createElement('div');
+  row.className = 'target-row';
+
+  const label = document.createElement('span');
+  label.className = 'target-label';
+  label.textContent = `${TYPE_ICONS[type]} ${TYPE_LABELS[type]}`;
+
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', `${TYPE_LABELS[type]}写进哪个数据库`);
+  const defaultName = job.targets?.[type]?.dbTitle;
+  select.append(new Option(`默认：${defaultName ? `「${defaultName}」` : '按设置自动选'}`, 'default'));
+  if (type === 'tv' && neededTypes().includes('movie')) select.append(new Option('和电影用同一个库', 'same'));
+  select.append(new Option('新建一个数据库…', 'new'));
+  const group = document.createElement('optgroup');
+  group.label = '已有的数据库';
+  if (!dbList) group.append(Object.assign(new Option('正在读取…', ''), { disabled: true }));
+  else if (!dbList.length) group.append(Object.assign(new Option('（插件还没有可以访问的数据库）', ''), { disabled: true }));
+  for (const db of dbList || []) group.append(new Option(`${db.icon || '🗂'} ${db.title}`, `db:${db.id}`));
+  select.append(group);
+  select.value = c.kind === 'existing' ? `db:${c.databaseId}` : c.kind;
+  // 记住的库已经不在列表里（被删了或断开了连接）
+  if (c.kind === 'existing' && select.value !== `db:${c.databaseId}`) {
+    select.append(new Option(`🗂 ${c.title || '之前选的库'}`, `db:${c.databaseId}`));
+    select.value = `db:${c.databaseId}`;
+  }
+  select.addEventListener('change', () => onTargetChange(type, select.value));
+
+  row.append(label, select);
+
+  if (c.kind === 'new') {
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.value = c.title ?? suggestedTitle(type);
+    name.placeholder = '新数据库的名字';
+    name.setAttribute('aria-label', '新数据库的名字');
+    name.addEventListener('input', () => {
+      c.title = name.value;
+      row.querySelector('.target-note').textContent = targetNote(type).text;
+      saveSelectionSoon();
+    });
+    if (c.title === undefined) c.title = name.value;
+    row.append(name);
+  }
+
+  const note = document.createElement('p');
+  const { text, kind } = targetNote(type);
+  note.className = `target-note muted small-text ${kind || ''}`;
+  note.textContent = text;
+  row.append(note);
+  return row;
+}
+
+function renderTargets() {
+  $('targetRows').replaceChildren(...neededTypes().map(targetRow));
+}
+
+function onTargetChange(type, value) {
+  const prev = choiceOf(type);
+  let next;
+  if (value === 'default' || value === 'same') next = { kind: value };
+  else if (value === 'new') next = { kind: 'new', title: undefined };
+  else {
+    const id = value.slice(3);
+    next = { kind: 'existing', databaseId: id, title: dbList?.find((d) => d.id === id)?.title || '' };
+  }
+  job.choice[type] = next;
+  // 电影换了库、剧集还在默认库：多半是想放在一起
+  if (type === 'movie' && next.kind !== 'default' && choiceOf('tv').kind === 'default' && neededTypes().includes('tv')) {
+    job.choice.tv = { kind: 'same' };
+  }
+  if (type === 'movie' && next.kind === 'default' && prev.kind !== 'default' && choiceOf('tv').kind === 'same') {
+    job.choice.tv = { kind: 'default' };
+  }
+  refreshTarget(type);
+}
+
+// 换了库之后，重新判断哪些条目已经在这个库里
+async function refreshTarget(type) {
+  const types = [type];
+  if (type === 'movie' && neededTypes().includes('tv')) types.push('tv');
+  for (const t of types) job.targetInfo[t] = { loading: true };
+  renderTargets();
+  await Promise.all(
+    types.map(async (t) => {
+      const target = effectiveChoice(t);
+      if (target.kind === 'new') {
+        job.existingKeys[t] = [];
+        job.targetInfo[t] = { how: 'create', dbTitle: target.title || suggestedTitle(t), missing: [], count: 0 };
+        return;
+      }
+      try {
+        const r = await bg('listExisting', { type: t, target });
+        job.existingKeys[t] = r.keys;
+        job.targetInfo[t] = { how: r.how, dbTitle: r.dbTitle, missing: r.missing, count: r.keys.length };
+      } catch (err) {
+        job.existingKeys[t] = [];
+        job.targetInfo[t] = { error: err.message };
+      }
+    }),
+  );
+  applyExisting();
+  renderTargets();
+  renderList();
+  saveSelectionSoon();
+}
+
+// 按当前选的库更新“已在 Notion”标记；只改状态变了的条目的勾选，其余保持用户的选择
+function applyExisting() {
+  const sets = Object.fromEntries(['book', 'movie', 'tv'].map((t) => [t, new Set(job.existingKeys[t] || [])]));
+  for (const item of job.all) {
+    const now = typesOf(item).some((t) => sets[t].has(item.key));
+    if (now === item.exists) continue;
+    item.exists = now;
+    if (now) selected.delete(item.key);
+    else selected.add(item.key);
+  }
+}
+
+// 开始前：把要新建的库建好、已有库补好字段，之后每条直接写入
+async function prepareTargets(types) {
+  const resolved = {};
+  const order = ['book', 'movie', 'tv'];
+  // 剧集和电影共用时，要先确定电影的库
+  const need = new Set(types);
+  if (need.has('tv') && choiceOf('tv').kind === 'same') need.add('movie');
+  for (const t of order.filter((x) => need.has(x))) {
+    $('startBtn').textContent = `正在准备${TYPE_LABELS[t]}数据库…`;
+    const target = t === 'tv' && choiceOf('tv').kind === 'same' ? { kind: 'existing', databaseId: resolved.movie.databaseId } : effectiveChoice(t);
+    const r = await bg('prepareTarget', { type: t, target });
+    resolved[t] = { kind: 'existing', databaseId: r.databaseId, title: r.dbTitle };
+  }
+  return resolved;
+}
+
+// 记住这个来源的选择；新建的库记成“已有库”，下次直接写进去
+async function rememberChoice(resolved) {
+  const memory = (await chrome.storage.local.get(MEMORY_KEY))[MEMORY_KEY] || {};
+  const choice = {};
+  for (const t of ['book', 'movie', 'tv']) {
+    const c = choiceOf(t);
+    if (c.kind === 'default' || c.kind === 'same') choice[t] = { kind: c.kind };
+    else if (resolved[t]) choice[t] = resolved[t];
+  }
+  const key = sourceKey(job.config);
+  delete memory[key];
+  memory[key] = choice;
+  // 只留最近 50 个来源
+  const keys = Object.keys(memory);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 50))) delete memory[k];
+  await chrome.storage.local.set({ [MEMORY_KEY]: memory });
 }
 
 async function startImport() {
   clearTimeout(saveTimer);
   job.selected = [...selected];
   job.items = job.all.filter((i) => selected.has(i.key));
+  $('startError').hidden = true;
+  $('startBtn').disabled = true;
+  try {
+    const types = [...new Set(job.items.flatMap(typesOf))];
+    job.resolved = await prepareTargets(types);
+    await rememberChoice(job.resolved);
+  } catch (err) {
+    $('startError').textContent = `没能准备好数据库：${err.message}`;
+    $('startError').hidden = false;
+    $('startBtn').textContent = '开始导入';
+    $('startBtn').disabled = false;
+    return;
+  }
+  $('startBtn').textContent = '开始导入';
+  $('startBtn').disabled = false;
   job.next = 0;
   job.stats = { created: 0, updated: 0, failed: 0 };
   job.failures = [];
@@ -597,7 +841,7 @@ async function run() {
     $('current').textContent = `正在处理：${item.title}`;
     try {
       const info = await collectInfo(item);
-      const r = await bg('sync', { info });
+      const r = await bg('sync', { info, target: job.resolved?.[info.type] });
       blockedTimes = 0;
       noResponseTimes = 0;
       if (r.updated) job.stats.updated++;

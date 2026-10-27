@@ -138,7 +138,14 @@
       </div>
       <ul id="itemList" class="item-list"></ul>
 
-      <ul id="targets" class="summary muted" hidden></ul>
+      <div id="targetBox" class="target-box">
+        <div class="target-head">
+          <strong>写进哪个 Notion 数据库</strong>
+          <span class="muted small-text">可以每种类型分别选；会记住这个来源上次的选择</span>
+        </div>
+        <div id="targetRows" class="target-rows"></div>
+      </div>
+      <p id="startError" class="row-status error" hidden></p>
       <div class="selection-bar">
         <span id="selectionText" class="counts"></span>
         <div class="row-actions">

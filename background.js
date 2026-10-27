@@ -1,6 +1,6 @@
 import { MAPPINGS } from './config.js';
 import { blockKind, subjectKey } from './douban.js';
-import { resolveDatabase } from './databases.js';
+import { resolveChosen, resolveDatabase } from './databases.js';
 import {
   NotionClient,
   buildChildren,
@@ -106,10 +106,13 @@ const resolving = new Map();
  * create = true：找不到就建，缺字段就补（真正保存时用）；
  * create = false：只看不动（打开弹窗、导入预览时用），库还不存在时 databaseId 为 null。
  */
-async function getTarget(type, { create = true } = {}) {
+async function getTarget(type, { create = true, target = null } = {}) {
   const settings = await getSettings();
   if (!settings.notionToken) throw new Error('还没有填写 Notion Token，请先打开设置页。');
   const client = new NotionClient(settings.notionToken);
+
+  // 用户为这次保存另外选了库
+  if (target && target.kind !== 'default') return { client, ...(await getChosenTarget(client, settings, type, target, create)) };
 
   if (!create) {
     const r = await resolveDatabase(client, settings, type, { create: false });
@@ -136,6 +139,32 @@ async function getTarget(type, { create = true } = {}) {
   return { client, ...(await resolving.get(type)) };
 }
 
+// 用户选的库：已有库补过字段后，这次后台运行期间不再重复检查；
+// 新建库按“类型 + 名字”记住，避免重复建
+const chosenReady = new Map(); // `${type}:${databaseId}` -> 结果
+const chosenCreated = new Map(); // `${type}:${title}` -> Promise
+
+async function getChosenTarget(client, settings, type, target, create) {
+  if (!create) return resolveChosen(client, settings, type, target, { create: false });
+  if (target.kind === 'existing') {
+    const key = `${type}:${normalizeId(target.databaseId)}`;
+    if (chosenReady.has(key)) return { ...chosenReady.get(key), added: [] };
+    const r = await resolveChosen(client, settings, type, target, { create: true });
+    dbCache.delete(r.databaseId);
+    chosenReady.set(key, { how: r.how, databaseId: r.databaseId, dbTitle: r.dbTitle });
+    return r;
+  }
+  const key = `${type}:${String(target.title || '').trim()}`;
+  if (!chosenCreated.has(key)) {
+    chosenCreated.set(key, resolveChosen(client, settings, type, target, { create: true }).catch((err) => {
+      chosenCreated.delete(key);
+      throw err;
+    }));
+  }
+  const r = await chosenCreated.get(key);
+  return { ...r, how: 'created' };
+}
+
 // 设置变了（换了页面或数据库），重新解析
 chrome.storage.onChanged.addListener((changes) => {
   if ('notionToken' in changes || 'parentPageId' in changes) ready.clear();
@@ -153,8 +182,8 @@ async function findExistingPage(client, databaseId, db, type, url) {
 
 // ---------- 操作 ----------
 
-async function checkExisting({ info }) {
-  const { client, databaseId, dbTitle } = await getTarget(info.type, { create: false });
+async function checkExisting({ info, target }) {
+  const { client, databaseId, dbTitle } = await getTarget(info.type, { create: false, target });
   if (!databaseId) return { exists: false, url: null, dbTitle };
   const db = await getDatabaseCached(client, databaseId);
   const page = await findExistingPage(client, databaseId, db, info.type, info.url);
@@ -172,9 +201,9 @@ function keepOldSources(properties, existingPage, db, type) {
   properties[field] = { multi_select: names.map((name) => ({ name })) };
 }
 
-async function sync({ info }) {
+async function sync({ info, target: chosen }) {
   const { type } = info;
-  const target = await getTarget(type);
+  const target = await getTarget(type, { target: chosen });
   const { client, databaseId } = target;
   dbCache.delete(databaseId); // 同步时总是用最新结构
   const db = await getDatabaseCached(client, databaseId);
@@ -201,6 +230,7 @@ async function sync({ info }) {
     coverUploaded: !!coverUploadId,
     dbTitle: databaseTitle(db),
     dbUrl: db.url,
+    databaseId,
     dbCreated: target.how === 'created',
     fieldsAdded: target.added || [],
   };
@@ -325,8 +355,8 @@ async function doubanHtml({ url }) {
 }
 
 // 数据库里已有条目的豆瓣编号，用来跳过已导入的；同时说明会用哪个数据库
-async function listExisting({ type }) {
-  const { client, databaseId, how, dbTitle, missing } = await getTarget(type, { create: false });
+async function listExisting({ type, target }) {
+  const { client, databaseId, how, dbTitle, missing } = await getTarget(type, { create: false, target });
   const plan = { how, dbTitle, missing: missing || [] };
   if (!databaseId) return { ...plan, canDedupe: true, keys: [] }; // 库还没建，自然没有重复
   const db = await getDatabaseCached(client, databaseId);
@@ -336,6 +366,27 @@ async function listExisting({ type }) {
   if (db.properties[field].type !== 'url') return { ...plan, canDedupe: false, keys: [] };
   const urls = await client.listUrls(databaseId, field);
   return { ...plan, canDedupe: true, keys: urls.map(subjectKey).filter(Boolean) };
+}
+
+// 开始导入前，把“新建”的库建好、已有库的字段补好，之后每条直接写入
+async function prepareTarget({ type, target }) {
+  const r = await getTarget(type, { create: true, target });
+  const db = r.db || (await getDatabaseCached(r.client, r.databaseId));
+  return { databaseId: r.databaseId, dbTitle: databaseTitle(db), dbUrl: db.url, how: r.how, added: r.added || [] };
+}
+
+// 插件能访问的数据库，给“选择已有数据库”用
+async function listDatabases({ query = '' } = {}) {
+  const settings = await getSettings();
+  if (!settings.notionToken) throw new Error('还没有填写 Notion Token，请先打开设置页。');
+  const client = new NotionClient(settings.notionToken);
+  const dbs = await client.searchDatabases(query);
+  return dbs.map((d) => ({
+    id: d.id,
+    title: databaseTitle(d),
+    url: d.url,
+    icon: d.icon?.type === 'emoji' ? d.icon.emoji : '',
+  }));
 }
 
 // 导入页切到后台后，页面里的定时器会被 Chrome 限流，所以等待放在后台脚本里做
@@ -351,6 +402,8 @@ const HANDLERS = {
   doubanHtml,
   doubanMe,
   listExisting,
+  prepareTarget,
+  listDatabases,
 };
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {

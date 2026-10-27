@@ -1,6 +1,6 @@
 import { scrapeDouban } from './scraper.js';
 import { collectSubjects } from './collector.js';
-import { STATUS_LABELS } from './config.js';
+import { STATUS_LABELS, TYPE_LABELS } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (el, visible = true) => {
@@ -13,6 +13,9 @@ let stars = 0; // 我的评分：0 = 不评
 let markedOnDouban = false; // 标记是不是从豆瓣页面上读来的
 let saved = null; // 保存后的结果；改了标记之后清空
 let existingUrl = null;
+let target = { kind: 'default' }; // 这次保存写进哪个库；每次打开弹窗都从默认库开始
+let defaultDbTitle = '';
+let dbList = null;
 
 async function callBackground(action, payload = {}) {
   const res = await chrome.runtime.sendMessage({ action, ...payload });
@@ -143,23 +146,89 @@ function renderActions(exists) {
   $('sync').textContent = exists ? '更新 Notion 里的这一条' : '保存到 Notion';
 }
 
+function changeLink() {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'text-btn';
+  b.textContent = $('targetPicker').hidden ? '换一个库' : '收起';
+  b.addEventListener('click', toggleTargetPicker);
+  return b;
+}
+
 async function checkExisting() {
-  show($('existing'), false);
+  existingUrl = null;
+  if (target.kind === 'new') {
+    const name = $('newDbName').value.trim() || '新数据库';
+    $('existing').replaceChildren(`会新建「${name}」并保存进去。`, ' ', changeLink());
+    show($('existing'));
+    renderActions(false);
+    return;
+  }
   try {
-    const { exists, url, dbTitle } = await callBackground('checkExisting', { info });
+    const { exists, url, dbTitle } = await callBackground('checkExisting', { info, target });
+    if (target.kind === 'default') defaultDbTitle = dbTitle;
     existingUrl = exists ? url : null;
     if (exists) {
-      $('existing').replaceChildren(`「${dbTitle}」里已经有这一条，保存会更新它。`, link('查看', url));
-      show($('existing'));
-    } else if (dbTitle) {
-      $('existing').textContent = `会保存到「${dbTitle}」。`;
+      $('existing').replaceChildren(`「${dbTitle}」里已经有这一条，保存会更新它。`, link('查看', url), ' ', changeLink());
+    } else {
+      $('existing').replaceChildren(`会保存到「${dbTitle || '默认数据库'}」。`, ' ', changeLink());
+    }
+    show($('existing'));
+    renderActions(exists);
+  } catch (err) {
+    // 查重失败不影响保存，保存时会给出具体错误
+    if (target.kind !== 'default') {
+      $('existing').replaceChildren(err.message, ' ', changeLink());
       show($('existing'));
     }
-    renderActions(exists);
-  } catch {
-    // 查重失败不影响保存，保存时会给出具体错误
     renderActions(false);
   }
+}
+
+// ---------- 换一个库 ----------
+
+async function toggleTargetPicker() {
+  const open = $('targetPicker').hidden;
+  show($('targetPicker'), open);
+  for (const b of $('existing').querySelectorAll('.text-btn')) b.textContent = open ? '收起' : '换一个库';
+  if (!open) return;
+  renderTargetSelect();
+  if (!dbList) {
+    try {
+      dbList = await callBackground('listDatabases');
+    } catch {
+      dbList = [];
+    }
+    renderTargetSelect();
+  }
+}
+
+function renderTargetSelect() {
+  const sel = $('targetSelect');
+  sel.replaceChildren(
+    new Option(`默认：${defaultDbTitle ? `「${defaultDbTitle}」` : '按设置自动选'}`, 'default'),
+    new Option('新建一个数据库…', 'new'),
+  );
+  const group = document.createElement('optgroup');
+  group.label = '已有的数据库';
+  if (!dbList) group.append(Object.assign(new Option('正在读取…', ''), { disabled: true }));
+  for (const db of dbList || []) group.append(new Option(`${db.icon || '🗂'} ${db.title}`, `db:${db.id}`));
+  sel.append(group);
+  sel.value = target.kind === 'existing' ? `db:${target.databaseId}` : target.kind;
+}
+
+function onTargetSelect() {
+  const v = $('targetSelect').value;
+  if (v === 'default') target = { kind: 'default' };
+  else if (v === 'new') {
+    if (!$('newDbName').value) $('newDbName').value = `豆瓣${TYPE_LABELS[info.type]}`;
+    target = { kind: 'new', title: $('newDbName').value.trim() };
+  } else target = { kind: 'existing', databaseId: v.slice(3) };
+  show($('newDbName'), target.kind === 'new');
+  if (target.kind === 'new') $('newDbName').focus();
+  saved = null;
+  show($('result'), false);
+  checkExisting();
 }
 
 async function onSync() {
@@ -167,9 +236,17 @@ async function onSync() {
   $('sync').textContent = '正在保存…';
   show($('result'), false);
   try {
-    const r = await callBackground('sync', { info: payload() });
+    if (target.kind === 'new') target.title = $('newDbName').value.trim() || `豆瓣${TYPE_LABELS[info.type]}`;
+    const r = await callBackground('sync', { info: payload(), target });
     saved = r;
     existingUrl = r.url;
+    // 新建的库建好了：之后（比如“重新保存”）就写进这个库，不再新建
+    if (target.kind === 'new') {
+      target = { kind: 'existing', databaseId: r.databaseId };
+      dbList = null;
+      show($('newDbName'), false);
+      show($('targetPicker'), false);
+    }
     const notes = [];
     if (r.dbCreated) notes.push(`新建了数据库「${r.dbTitle}」`);
     if (r.fieldsAdded.length) notes.push(`补上了 ${r.fieldsAdded.length} 个字段`);
@@ -266,6 +343,11 @@ async function init() {
   $('goSettings').addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('openImport').addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('import.html') }));
   $('sync').addEventListener('click', onSync);
+  $('targetSelect').addEventListener('change', onTargetSelect);
+  $('newDbName').addEventListener('input', () => {
+    target.title = $('newDbName').value.trim();
+    checkExisting();
+  });
   for (const b of $('typeSwitch').querySelectorAll('button')) {
     b.addEventListener('click', () => {
       if (info.type === b.dataset.type) return;

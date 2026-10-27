@@ -278,6 +278,27 @@ export class NotionClient {
     return this.request(`/pages/${id}`);
   }
 
+  // 插件能访问的数据库（Notion 只会返回已经“连接”了这个集成的）
+  async searchDatabases(query = '', limit = 200) {
+    const out = [];
+    let cursor;
+    do {
+      const res = await this.request('/search', {
+        method: 'POST',
+        body: {
+          query,
+          filter: { property: 'object', value: 'database' },
+          sort: { direction: 'descending', timestamp: 'last_edited_time' },
+          page_size: 100,
+          ...(cursor ? { start_cursor: cursor } : {}),
+        },
+      });
+      out.push(...(res.results || []).filter((d) => !d.archived && !d.in_trash));
+      cursor = res.has_more ? res.next_cursor : null;
+    } while (cursor && out.length < limit);
+    return out.slice(0, limit);
+  }
+
   updateDatabase(id, body) {
     return this.request(`/databases/${id}`, { method: 'PATCH', body });
   }
