@@ -59,6 +59,7 @@ let running = false;
 let pauseRequested = false;
 
 async function saveJob() {
+  job.heartbeat = Date.now(); // 让自动同步知道批量导入还在进行
   await chrome.storage.local.set({ [JOB_KEY]: job });
 }
 

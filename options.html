@@ -43,6 +43,53 @@
       <button type="button" id="applyBtn" class="secondary" hidden>现在就建好 / 补全</button>
     </section>
 
+    <section class="panel" id="autoPanel">
+      <h2><span class="step-num">3</span>自动同步 <span class="muted small-text">可选</span></h2>
+      <label class="switch-row">
+        <input type="checkbox" id="autoEnabled">
+        <span>定时把豆瓣上的新标记同步到 Notion（新标记、改了状态 / 评分 / 短评的都会同步）</span>
+      </label>
+      <div id="autoFields" class="auto-fields">
+        <label class="field">
+          <span>豆瓣账号</span>
+          <div class="input-row">
+            <input type="text" id="autoUid" placeholder="个人主页链接或用户 ID">
+            <button type="button" id="autoUseMe" class="secondary">用当前登录的账号</button>
+          </div>
+        </label>
+        <div class="auto-grid">
+          <fieldset class="checks">
+            <legend>📚 图书</legend>
+            <label><input type="checkbox" name="autoBook" value="mark"> 想读</label>
+            <label><input type="checkbox" name="autoBook" value="doing"> 在读</label>
+            <label><input type="checkbox" name="autoBook" value="done"> 读过</label>
+          </fieldset>
+          <fieldset class="checks">
+            <legend>🎬 电影和剧集</legend>
+            <label><input type="checkbox" name="autoMovie" value="mark"> 想看</label>
+            <label><input type="checkbox" name="autoMovie" value="doing"> 在看</label>
+            <label><input type="checkbox" name="autoMovie" value="done"> 看过</label>
+          </fieldset>
+          <label class="field narrow">
+            <span>多久一次</span>
+            <select id="autoPeriod">
+              <option value="360">每 6 小时</option>
+              <option value="720">每 12 小时</option>
+              <option value="1440">每天</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted small-text">
+          浏览器开着时才会运行。第一次运行只记下现在的状态，之后的新变化才会同步——以前的标记请用
+          <a href="import.html">批量导入</a>。写进的库和你批量导入「我的标记」时选的一样，没选过就用默认库。
+        </p>
+        <div class="auto-status-row">
+          <p id="autoStatus" class="check" aria-live="polite"></p>
+          <button type="button" id="autoRunNow" class="secondary">立即同步一次</button>
+        </div>
+      </div>
+    </section>
+
     <section class="panel">
       <details id="advanced">
         <summary>已有数据库（可选）</summary>

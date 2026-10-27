@@ -1,6 +1,7 @@
 import { MAPPINGS } from './config.js';
-import { blockKind, subjectKey } from './douban.js';
+import { blockKind, mergeDetail, subjectKey } from './douban.js';
 import { resolveChosen, resolveDatabase } from './databases.js';
+import { DEFAULT_STATE, STATE_KEY, runOnce } from './autosync.js';
 import {
   NotionClient,
   buildChildren,
@@ -389,6 +390,128 @@ async function listDatabases({ query = '' } = {}) {
   }));
 }
 
+// ---------- 自动同步 ----------
+
+const ALARM = 'autoSync';
+const ALARM_MORE = 'autoSyncMore'; // 队列没做完时，过一会儿接着做
+
+async function loadAutoSync() {
+  const stored = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
+  return { ...DEFAULT_STATE, ...(stored || {}) };
+}
+
+async function scheduleAutoSync(state) {
+  await chrome.alarms.clear(ALARM);
+  if (state.enabled) await chrome.alarms.create(ALARM, { periodInMinutes: state.period, delayInMinutes: 1 });
+  else await chrome.alarms.clear(ALARM_MORE);
+}
+
+// 后台没有 DOM：详情页交给离屏文档解析
+async function parseInOffscreen(html, url) {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+  if (!contexts.length) {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['DOM_PARSER'],
+      justification: '自动同步时解析豆瓣条目页',
+    });
+  }
+  const res = await chrome.runtime.sendMessage({ target: 'offscreen', action: 'parseSubject', html, url });
+  if (!res?.success) throw new Error(res?.error || '解析页面失败');
+  return res.data;
+}
+
+// 自动同步写进哪个库：沿用批量导入“我的标记”时为这个账号选的库，没选过就用默认库
+async function autoSyncTarget(uid, type) {
+  const memory = (await chrome.storage.local.get('targetMemory')).targetMemory || {};
+  const choice = memory[`mine:${uid}`] || {};
+  const c = choice[type]?.kind === 'same' ? choice.movie : choice[type];
+  return c && c.kind === 'existing' ? c : null;
+}
+
+async function setBadge(result) {
+  const bad = !!result?.errorCode;
+  await chrome.action.setBadgeText({ text: bad ? '!' : '' });
+  if (bad) await chrome.action.setBadgeBackgroundColor({ color: '#c0392b' });
+}
+
+let autoRunning = null;
+
+async function runAutoSync({ manual = false } = {}) {
+  if (autoRunning) return autoRunning;
+  autoRunning = (async () => {
+    const state = await loadAutoSync();
+    if (!state.enabled && !manual) return state.lastResult;
+    if (!state.uid) throw new Error('还没有设置豆瓣账号。');
+    // 手动批量导入正在进行时先不跑，避免同时向豆瓣发太多请求
+    const job = (await chrome.storage.local.get('importJob')).importJob;
+    if (job?.phase === 'running' && Date.now() - (job.heartbeat || 0) < 2 * 60 * 1000) {
+      return { ...state.lastResult, skipped: '批量导入正在进行，这次自动同步跳过' };
+    }
+
+    let lastDetailAt = 0;
+    const deps = {
+      interests: ({ uid, kind, status }) => doubanInterests({ uid, kind, status, start: 0, count: 50 }),
+      detail: async (info) => {
+        const wait = lastDetailAt + 3000 + Math.random() * 2000 - Date.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        lastDetailAt = Date.now();
+        try {
+          const { html, url } = await doubanPage({ url: info.url });
+          const page = await parseInOffscreen(html, url);
+          return page.error ? info : mergeDetail(info, page);
+        } catch (err) {
+          if (err.code === 'DOUBAN_NOT_FOUND') return info;
+          throw err;
+        }
+      },
+      sync: async (info) => sync({ info, target: await autoSyncTarget(state.uid, info.type) }),
+      wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+      now: () => Date.now(),
+    };
+
+    // 状态可能在运行期间被设置页改了（比如关掉），最后只回写同步相关的字段
+    const { state: after } = await runOnce(state, deps);
+    const latest = await loadAutoSync();
+    const merged = { ...latest, snapshot: after.snapshot, baselined: after.baselined, queue: after.queue, lastRun: after.lastRun, lastResult: after.lastResult };
+    await chrome.storage.local.set({ [STATE_KEY]: merged });
+    await setBadge(merged.lastResult);
+    if (merged.enabled && merged.queue.length && !merged.lastResult?.errorCode) {
+      await chrome.alarms.create(ALARM_MORE, { delayInMinutes: 15 });
+    }
+    return merged.lastResult;
+  })().finally(() => {
+    autoRunning = null;
+  });
+  return autoRunning;
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ALARM || alarm.name === ALARM_MORE) runAutoSync().catch((err) => console.warn('自动同步失败', err));
+});
+
+// 浏览器重启后定时任务可能丢失，补上
+chrome.runtime.onStartup.addListener(async () => {
+  const state = await loadAutoSync();
+  if (state.enabled && !(await chrome.alarms.get(ALARM))) await scheduleAutoSync(state);
+});
+
+// 设置页改了自动同步的设置。换了账号或列表，就重新记快照
+async function setAutoSync({ patch }) {
+  const prev = await loadAutoSync();
+  const next = { ...prev, ...patch };
+  const scopeChanged = patch.uid !== undefined && patch.uid !== prev.uid
+    || patch.kinds !== undefined && JSON.stringify(patch.kinds) !== JSON.stringify(prev.kinds);
+  if (scopeChanged) Object.assign(next, { snapshot: {}, baselined: false, queue: [] });
+  await chrome.storage.local.set({ [STATE_KEY]: next });
+  if ('enabled' in patch || 'period' in patch) await scheduleAutoSync(next);
+  return next;
+}
+
+async function runAutoSyncNow() {
+  return runAutoSync({ manual: true });
+}
+
 // 导入页切到后台后，页面里的定时器会被 Chrome 限流，所以等待放在后台脚本里做
 const sleep = ({ ms }) => new Promise((r) => setTimeout(() => r(true), Math.min(ms, 4 * 60 * 1000)));
 
@@ -404,6 +527,8 @@ const HANDLERS = {
   listExisting,
   prepareTarget,
   listDatabases,
+  setAutoSync,
+  runAutoSyncNow,
 };
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {

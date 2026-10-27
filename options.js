@@ -1,5 +1,7 @@
 import { TYPE_ICONS, TYPE_LABELS } from './config.js';
 import { normalizeId } from './notion.js';
+import { DEFAULT_STATE, STATE_KEY, describeStatus } from './autosync.js';
+import { parseUserId } from './douban.js';
 
 const $ = (id) => document.getElementById(id);
 const DB_KEYS = ['bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId'];
@@ -127,6 +129,98 @@ async function check(apply) {
   else setBanner('success', '✓ 一切就绪。去豆瓣打开一本书或一部电影，点插件图标就能保存。', true);
 }
 
+// ---------- 自动同步 ----------
+
+let auto = { ...DEFAULT_STATE };
+
+function renderAuto() {
+  $('autoEnabled').checked = auto.enabled;
+  $('autoFields').classList.toggle('dim', !auto.enabled);
+  if (document.activeElement !== $('autoUid')) $('autoUid').value = auto.uid || '';
+  for (const [name, kind] of [['autoBook', 'book'], ['autoMovie', 'movie']]) {
+    for (const box of document.querySelectorAll(`input[name="${name}"]`)) box.checked = (auto.kinds[kind] || []).includes(box.value);
+  }
+  $('autoPeriod').value = String(auto.period);
+  const { text, kind } = describeStatus(auto);
+  $('autoStatus').textContent = text;
+  $('autoStatus').className = `check ${kind}`;
+  $('autoRunNow').hidden = !auto.enabled;
+}
+
+async function patchAuto(patch) {
+  try {
+    auto = await callBackground('setAutoSync', { patch });
+  } catch (err) {
+    $('autoStatus').textContent = err.message;
+    $('autoStatus').className = 'check error';
+    return;
+  }
+  renderAuto();
+}
+
+async function fillMyAccount() {
+  $('autoUseMe').disabled = true;
+  try {
+    const { uid, name } = await callBackground('doubanMe');
+    if (uid) {
+      await patchAuto({ uid });
+      $('autoStatus').textContent = `✓ 已识别当前登录的豆瓣账号${name ? `「${name}」` : ''}。`;
+      $('autoStatus').className = 'check success';
+      return true;
+    }
+    $('autoStatus').textContent = '没有检测到登录的豆瓣账号。请先在浏览器里登录豆瓣，或者直接粘贴个人主页链接。';
+    $('autoStatus').className = 'check warn';
+  } catch (err) {
+    $('autoStatus').textContent = `识别失败：${err.message}`;
+    $('autoStatus').className = 'check error';
+  } finally {
+    $('autoUseMe').disabled = false;
+  }
+  return false;
+}
+
+async function initAuto() {
+  auto = { ...DEFAULT_STATE, ...((await chrome.storage.local.get(STATE_KEY))[STATE_KEY] || {}) };
+  renderAuto();
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes[STATE_KEY]) {
+      auto = { ...DEFAULT_STATE, ...changes[STATE_KEY].newValue };
+      renderAuto();
+    }
+  });
+
+  $('autoEnabled').addEventListener('change', async () => {
+    const enabled = $('autoEnabled').checked;
+    await patchAuto({ enabled });
+    // 打开时还没填账号：先试着自动识别
+    if (enabled && !auto.uid && !(await fillMyAccount())) $('autoUid').focus();
+  });
+  $('autoUid').addEventListener('change', () => patchAuto({ uid: parseUserId($('autoUid').value) }));
+  $('autoUseMe').addEventListener('click', fillMyAccount);
+  for (const name of ['autoBook', 'autoMovie']) {
+    for (const box of document.querySelectorAll(`input[name="${name}"]`)) {
+      box.addEventListener('change', () => {
+        const read = (n) => [...document.querySelectorAll(`input[name="${n}"]:checked`)].map((b) => b.value);
+        patchAuto({ kinds: { book: read('autoBook'), movie: read('autoMovie') } });
+      });
+    }
+  }
+  $('autoPeriod').addEventListener('change', () => patchAuto({ period: Number($('autoPeriod').value) }));
+  $('autoRunNow').addEventListener('click', async () => {
+    $('autoRunNow').disabled = true;
+    $('autoStatus').textContent = '正在同步…（会比较慢，每条之间要等几秒）';
+    $('autoStatus').className = 'check info';
+    try {
+      await callBackground('runAutoSyncNow');
+    } catch (err) {
+      $('autoStatus').textContent = err.message;
+      $('autoStatus').className = 'check error';
+    } finally {
+      $('autoRunNow').disabled = false;
+    }
+  });
+}
+
 // ---------- 入口 ----------
 
 async function init() {
@@ -158,6 +252,7 @@ async function init() {
   });
 
   check(false);
+  initAuto();
 }
 
 init();

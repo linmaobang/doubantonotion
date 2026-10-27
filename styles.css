@@ -541,3 +541,23 @@ details .db-row { border-top: none; padding-top: 4px; }
 }
 .target-picker { display: flex; flex-direction: column; gap: 6px; }
 .hint .text-btn { padding: 0 2px; text-decoration: underline; font-size: 12px; }
+
+/* ---------- 自动同步 ---------- */
+.switch-row { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-weight: 600; }
+.switch-row input { width: auto; margin-top: 2px; }
+.auto-fields { display: flex; flex-direction: column; gap: 12px; transition: opacity 0.2s; }
+.auto-fields.dim { opacity: 0.5; }
+.auto-grid { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: flex-start; }
+.auto-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.auto-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+.auto-footer.error { color: var(--error); }
+.auto-footer.warn { color: var(--warn); }
+.auto-footer .text-btn { margin-left: auto; font-size: 12px; text-decoration: underline; white-space: nowrap; }

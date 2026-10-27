@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "豆瓣同步到 Notion",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "一键或批量把豆瓣图书、电影、剧集（含你的标记和评分）保存到 Notion 数据库。",
   "permissions": [
     "storage",
     "unlimitedStorage",
     "activeTab",
     "scripting",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
     "https://book.douban.com/*",

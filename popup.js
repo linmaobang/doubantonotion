@@ -1,6 +1,7 @@
 import { scrapeDouban } from './scraper.js';
 import { collectSubjects } from './collector.js';
 import { STATUS_LABELS, TYPE_LABELS } from './config.js';
+import { STATE_KEY, describeStatus } from './autosync.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (el, visible = true) => {
@@ -336,6 +337,27 @@ async function initListPage(tab) {
   });
 }
 
+// ---------- 自动同步状态 ----------
+
+async function renderAutoFooter() {
+  const state = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
+  if (!state?.enabled) return;
+  const { short, text, kind, needsDouban } = describeStatus(state);
+  $('autoText').textContent = short;
+  $('autoFooter').title = text;
+  $('autoFooter').className = `auto-footer ${kind}`;
+  show($('autoFooter'));
+  if (needsDouban) {
+    $('autoAction').textContent = '打开豆瓣';
+    $('autoAction').onclick = () => chrome.tabs.create({ url: 'https://www.douban.com/' });
+    show($('autoAction'));
+  } else if (kind === 'error') {
+    $('autoAction').textContent = '去设置';
+    $('autoAction').onclick = () => chrome.runtime.openOptionsPage();
+    show($('autoAction'));
+  }
+}
+
 // ---------- 入口 ----------
 
 async function init() {
@@ -360,6 +382,7 @@ async function init() {
     });
   }
 
+  renderAutoFooter();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || '';
   if (/^https:\/\/(book|movie)\.douban\.com\/subject\/\d+/.test(url)) return initSubject(tab);
