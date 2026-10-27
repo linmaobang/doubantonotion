@@ -682,8 +682,9 @@ function targetRow(type) {
   if (dbId && c.kind !== 'same' && c.kind !== 'new' && !job.targetInfo[type].loading) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'text-btn';
-    b.textContent = '字段对应…';
+    b.className = 'chip-btn';
+    b.textContent = '⇄ 字段对应';
+    b.title = '调整这个数据库的每一列放豆瓣的哪项信息';
     b.addEventListener('click', () => editMapping(type, dbId));
     note.append(' ', b);
   }

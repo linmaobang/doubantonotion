@@ -56,8 +56,9 @@ function li(text, kind = '') {
 function mapButton(type, databaseId) {
   const b = document.createElement('button');
   b.type = 'button';
-  b.className = 'text-btn';
-  b.textContent = '字段对应…';
+  b.className = 'chip-btn';
+  b.textContent = '⇄ 字段对应';
+  b.title = '调整这个数据库的每一列放豆瓣的哪项信息';
   b.addEventListener('click', async () => {
     if (await openMappingDialog({ databaseId, type })) check(false);
   });
@@ -65,9 +66,14 @@ function mapButton(type, databaseId) {
 }
 
 function describe(type, r) {
-  const item = describeLine(type, r);
-  if (r.databaseId && !r.error) item.append(' ', mapButton(type, r.databaseId));
-  return item;
+  const line = describeLine(type, r);
+  if (!r.databaseId || r.error) return line;
+  // 文字在左、按钮在右
+  const text = document.createElement('span');
+  text.textContent = line.textContent;
+  line.replaceChildren(text, mapButton(type, r.databaseId));
+  line.classList.add('with-action');
+  return line;
 }
 
 function describeLine(type, r) {

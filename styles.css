@@ -615,3 +615,30 @@ details .db-row { border-top: none; padding-top: 4px; }
 .map-actions .primary { width: auto; padding: 8px 20px; }
 @media (max-width: 520px) { .map-row { grid-template-columns: 1fr; } .map-row .map-hint { grid-column: 1; } }
 .badge.writing { background: none; border: 1px solid var(--border); }
+
+/* “⇄ 字段对应”这类行内操作按钮：要一眼能看到 */
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.chip-btn:hover { background: var(--accent); color: var(--on-accent); }
+.chip-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plan li.with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+.target-note .chip-btn { margin-left: 6px; vertical-align: 1px; }
