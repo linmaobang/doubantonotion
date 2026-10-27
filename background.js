@@ -157,6 +157,17 @@ async function checkExisting({ info }) {
   return { exists: !!page, url: page?.url || null, dbTitle: databaseTitle(db) };
 }
 
+// 更新已有条目时，“来源”在原有基础上追加，而不是覆盖
+// （同一本书可能先后从两个豆列导入）
+function keepOldSources(properties, existingPage, db, type) {
+  const field = findField('source', db.properties, MAPPINGS[type]);
+  const next = properties[field]?.multi_select;
+  const old = existingPage.properties?.[field]?.multi_select;
+  if (!next || !old) return;
+  const names = [...new Set([...old.map((o) => o.name), ...next.map((o) => o.name)])];
+  properties[field] = { multi_select: names.map((name) => ({ name })) };
+}
+
 async function sync({ info }) {
   const { type } = info;
   const target = await getTarget(type);
@@ -168,6 +179,7 @@ async function sync({ info }) {
   const coverUploadId = await uploadCover(client, info);
   const { properties, matched } = mapProperties(info, db.properties, type, { coverUploadId });
   const decorations = pageDecorations(info, coverUploadId);
+  if (existing) keepOldSources(properties, existing, db, type);
 
   const page = existing
     ? await client.updatePage(existing.id, { properties, ...decorations })
@@ -269,6 +281,23 @@ async function doubanPage({ url }) {
   return { html, url: res.url };
 }
 
+// 任意豆瓣列表页的 HTML（豆列、标签、Top250……），交给导入页解析。只允许豆瓣自己的域名。
+async function doubanHtml({ url }) {
+  if (!/^https:\/\/(www|book|movie)\.douban\.com\//.test(url)) {
+    throw new DoubanError('DOUBAN_BAD_URL', '只支持豆瓣（www / book / movie.douban.com）的页面链接。');
+  }
+  const res = await fetch(url, { credentials: 'include' });
+  const html = await res.text();
+  if (res.status === 404) throw new DoubanError('DOUBAN_NOT_FOUND', '页面不存在，请检查链接。');
+  if (res.status === 403 || res.status === 418 || res.status === 429) {
+    throw new DoubanError('DOUBAN_BLOCKED', '豆瓣认为请求太频繁。');
+  }
+  if (/sec\.douban\.com|accounts\.douban\.com/.test(res.url)) {
+    throw new DoubanError('DOUBAN_CHALLENGE', '豆瓣弹出了安全验证。');
+  }
+  return { html, url: res.url };
+}
+
 // 数据库里已有条目的豆瓣编号，用来跳过已导入的；同时说明会用哪个数据库
 async function listExisting({ type }) {
   const { client, databaseId, how, dbTitle, missing } = await getTarget(type, { create: false });
@@ -294,6 +323,7 @@ const HANDLERS = {
   preparePage,
   doubanInterests,
   doubanPage,
+  doubanHtml,
   listExisting,
 };
 

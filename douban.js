@@ -62,16 +62,19 @@ export function infoFromInterest(interest) {
   };
 }
 
-const USER_FIELDS = ['status', 'my_rating', 'marked_date', 'comment', 'my_tags'];
+const USER_FIELDS = ['status', 'my_rating', 'marked_date', 'comment', 'my_tags', 'source'];
 
 // 用详情页抓到的完整信息补全列表数据。详情页没有的字段（比如我的标记）保留列表里的值。
 export function mergeDetail(fromList, fromPage) {
   const merged = { ...fromList };
   for (const [key, value] of Object.entries(fromPage || {})) {
-    if (USER_FIELDS.includes(key) || key === 'type' || key === 'error') continue;
+    if (USER_FIELDS.includes(key) || key === 'error') continue;
+    // 类型以列表为准；只有列表里分不清电影还是剧集时，才用详情页的判断
+    if (key === 'type' && !fromList.typeGuess) continue;
     const empty = value === '' || value == null || (Array.isArray(value) && value.length === 0);
     if (!empty) merged[key] = value;
   }
+  delete merged.typeGuess;
   return merged;
 }
 

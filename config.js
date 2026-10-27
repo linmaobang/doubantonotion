@@ -14,6 +14,8 @@ const COMMON = {
   marked_date: ['标记日期', '标记时间', 'date marked'],
   comment: ['短评', '我的短评', 'comment'],
   my_tags: ['我的标签', 'my tags'],
+  // 从豆列、标签等页面批量导入时，记下来自哪里
+  source: ['来源', 'source'],
 };
 
 const SCREEN = {
@@ -84,6 +86,7 @@ const MINE = {
   标记日期: { date: {} },
   短评: text,
   我的标签: { multi_select: {} },
+  来源: { multi_select: {} },
 };
 
 // “一键创建数据库”时使用的结构。字段名都能在上面的 MAPPINGS 里找到。

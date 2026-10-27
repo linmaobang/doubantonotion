@@ -2,6 +2,7 @@ import { TYPE_ICONS, TYPE_LABELS, STATUS_LABELS } from './config.js';
 import { infoFromInterest, mergeDetail, parseUserId, subjectKey } from './douban.js';
 import { EMPTY_FILTERS, defaultSelection, filterItems, summarizeSelection, yearsOf } from './selection.js';
 import { scrapeDouban } from './scraper.js';
+import { collectSubjects, sourceLabel } from './collector.js';
 
 // ---------- 节奏控制 ----------
 // 实测约 1.5 秒一个详情页没有触发验证；这里取得更保守，并加随机抖动。
@@ -10,6 +11,8 @@ const DETAIL_GAP_MS = 3000; // 详情页两次请求之间（再加 0~2 秒随�
 const DETAIL_JITTER_MS = 2000;
 const BLOCK_BACKOFF_MS = [60 * 1000, 3 * 60 * 1000]; // 被拦后的等待时间，用完就暂停交给用户
 const PAGE_SIZE = 50;
+const HTML_PAGE_GAP_MS = 2000; // 列表页（豆列、标签……）两次请求之间
+const PENDING_KEY = 'pendingPage'; // 弹窗交过来的“当前页面”数据
 const JOB_KEY = 'importJob';
 
 const $ = (id) => document.getElementById(id);
@@ -57,12 +60,29 @@ async function clearJob() {
 
 // ---------- 第一步：读取列表 ----------
 
+let mode = 'mine'; // mine：我的豆瓣标记；page：豆瓣上的列表
+let preload = null; // 弹窗从当前页面读到的第一页（可能含“加载更多”后的条目）
+
+function setMode(next) {
+  mode = next;
+  for (const tab of document.querySelectorAll('.tab')) tab.setAttribute('aria-selected', String(tab.dataset.mode === mode));
+  $('mineFields').hidden = mode !== 'mine';
+  $('pageFields').hidden = mode !== 'page';
+  $('detailField').hidden = mode === 'page';
+  $('pageDetailNote').hidden = mode !== 'page';
+  scanStatus('');
+}
+
 function readConfig() {
   const checked = (name) => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => i.value);
   return {
+    mode,
     uid: parseUserId($('uid').value),
     kinds: { book: checked('book'), movie: checked('movie') },
-    detail: checked('detail')[0] === 'full',
+    // 列表页只有标题和评分，必须逐条抓详情页
+    detail: mode === 'page' || checked('detail')[0] === 'full',
+    pageUrl: $('pageUrl').value.trim(),
+    maxPages: Number($('maxPages').value),
   };
 }
 
@@ -86,42 +106,118 @@ async function fetchInterests(uid, kind, status) {
   return all;
 }
 
-async function scan() {
-  const config = readConfig();
-  if (!config.uid) return scanStatus('请填写豆瓣个人主页链接或用户 ID。', 'error');
-  if (!config.kinds.book.length && !config.kinds.movie.length) {
-    return scanStatus('至少勾选一项要导入的内容。', 'error');
-  }
-
-  const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
-  const needTypes = [
-    ...(config.kinds.book.length ? ['book'] : []),
-    ...(config.kinds.movie.length ? ['movie', 'tv'] : []),
-  ];
-  if (!settings.notionToken) return scanStatus('还没有填写 Notion Token，请先到设置页完成设置。', 'error');
-  const noTarget = needTypes.filter((t) => !settings.parentPageId && !settings[`${t}DatabaseId`]);
-  if (noTarget.length) return scanStatus('还没有选择 Notion 页面，请先到设置页填一个页面链接。', 'error');
-
-  $('scanBtn').disabled = true;
-  try {
-    // 1. 拉豆瓣列表
-    const items = [];
-    const seen = new Set();
-    for (const kind of ['book', 'movie']) {
-      for (const status of config.kinds[kind]) {
-        for (const interest of await fetchInterests(config.uid, kind, status)) {
-          const info = infoFromInterest(interest);
-          const key = subjectKey(info.url);
-          if (key && !seen.has(key)) {
-            seen.add(key);
-            items.push(info);
-          }
+// 我的豆瓣标记：移动版接口
+async function collectMine(config) {
+  const items = [];
+  const seen = new Set();
+  for (const kind of ['book', 'movie']) {
+    for (const status of config.kinds[kind]) {
+      for (const interest of await fetchInterests(config.uid, kind, status)) {
+        const info = infoFromInterest(interest);
+        const key = subjectKey(info.url);
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          items.push(info);
         }
       }
     }
+  }
+  return { items, note: '' };
+}
+
+// 豆瓣上的列表：一页页读，顺着“后页”往下翻
+async function collectPage(config) {
+  const items = [];
+  const seen = new Set();
+  const add = (list) => {
+    for (const item of list) {
+      if (!seen.has(item.key)) {
+        seen.add(item.key);
+        items.push({ ...item });
+      }
+    }
+  };
+  const limit = config.maxPages || Infinity;
+  let url = config.pageUrl;
+  let pages = 0;
+  let name = '';
+  let totalPages = 1;
+  let hasLoadMore = false;
+
+  // 弹窗已经从页面上读到了第一页，就不用再请求一次
+  if (preload && samePage(preload.url, config.pageUrl)) {
+    add(preload.items);
+    ({ name, totalPages, hasLoadMore } = preload);
+    url = preload.next;
+    pages = 1;
+  }
+  while (url && pages < limit) {
+    await doubanGap(HTML_PAGE_GAP_MS);
+    const { html, url: finalUrl } = await bg('doubanHtml', { url });
+    const r = collectSubjects(new DOMParser().parseFromString(html, 'text/html'), finalUrl);
+    if (!pages) ({ name, totalPages, hasLoadMore } = r);
+    add(r.items);
+    pages++;
+    url = r.next;
+    const of = Number.isFinite(limit) ? Math.min(totalPages, limit) : totalPages;
+    scanStatus(`正在读取「${name}」：第 ${pages} / ${of} 页，${items.length} 条`);
+    if (!r.items.length) break;
+  }
+
+  if (!items.length) {
+    throw new Error(
+      hasLoadMore || !pages
+        ? '这个页面的内容是滚动加载的，插件直接读不到。请在浏览器里打开它，点几次「加载更多」，再点插件图标里的「批量导入这个页面」。'
+        : '这个页面上没有找到图书或影视条目。',
+    );
+  }
+  const source = sourceLabel(config.pageUrl, name);
+  for (const item of items) item.source = source;
+
+  let note = `从「${name}」读了 ${pages} 页`;
+  if (url) note += `（共 ${totalPages} 页，还有没读的，可以返回把「最多读取」调大）`;
+  if (hasLoadMore && !url) note += '（页面是滚动加载的，只包含你在页面上已经加载出来的条目）';
+  return { items, note: `${note}。` };
+}
+
+function samePage(a, b) {
+  const norm = (u) => String(u || '').replace(/#.*$/, '').replace(/\/+$/, '');
+  return norm(a) === norm(b);
+}
+
+function validate(config) {
+  if (config.mode === 'mine') {
+    if (!config.uid) return '请填写豆瓣个人主页链接或用户 ID。';
+    if (!config.kinds.book.length && !config.kinds.movie.length) return '至少勾选一项要导入的内容。';
+  } else if (!/^https?:\/\/(www|book|movie)\.douban\.com\//.test(config.pageUrl)) {
+    return '请粘贴一个豆瓣列表页的链接（www / book / movie.douban.com）。';
+  }
+  return '';
+}
+
+async function scan() {
+  const config = readConfig();
+  const problem = validate(config);
+  if (problem) return scanStatus(problem, 'error');
+
+  const settings = await chrome.storage.local.get(['notionToken', 'parentPageId', 'bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId']);
+  if (!settings.notionToken) return scanStatus('还没有填写 Notion Token，请先到设置页完成设置。', 'error');
+  if (!settings.parentPageId && !settings.bookDatabaseId && !settings.movieDatabaseId && !settings.tvDatabaseId) {
+    return scanStatus('还没有选择 Notion 页面，请先到设置页填一个页面链接。', 'error');
+  }
+
+  $('scanBtn').disabled = true;
+  try {
+    // 1. 读豆瓣
+    const { items, note } = config.mode === 'mine' ? await collectMine(config) : await collectPage(config);
 
     // 2. 查 Notion 里已有的条目，顺便看每类会写进哪个数据库
     scanStatus('正在检查 Notion 里已有的条目…');
+    const needTypes = new Set();
+    for (const i of items) {
+      if (i.type === 'book') needTypes.add('book');
+      else needTypes.add('movie').add('tv'); // 电影域名下的条目可能是剧集
+    }
     const existing = new Set();
     const targets = {};
     for (const type of needTypes) {
@@ -137,6 +233,7 @@ async function scan() {
     job = {
       config,
       phase: 'review',
+      note,
       all: items, // 豆瓣上读到的全部条目
       selected: [...defaultSelection(items)], // 勾选的条目（subjectKey）
       filters: { ...EMPTY_FILTERS },
@@ -149,6 +246,7 @@ async function scan() {
       createdAt: Date.now(),
     };
     await saveJob();
+    await chrome.storage.local.remove(PENDING_KEY);
     scanStatus('');
     showReview();
   } catch (err) {
@@ -160,7 +258,9 @@ async function scan() {
 
 function scanError(err) {
   if (err.code === 'DOUBAN_CHALLENGE') {
-    return `豆瓣要求做一次安全验证。请在浏览器里打开 https://m.douban.com/people/${readConfig().uid}/ ，等页面正常显示后再点「读取列表」。`;
+    const c = readConfig();
+    const where = c.mode === 'page' ? c.pageUrl : `https://m.douban.com/people/${c.uid}/`;
+    return `豆瓣要求做一次安全验证。请在浏览器里打开 ${where} ，等页面正常显示后再点「读取列表」。`;
   }
   if (err.code === 'DOUBAN_BLOCKED') return '豆瓣认为请求太频繁，请过一会儿再试。';
   return err.message;
@@ -230,6 +330,8 @@ function buildFilters() {
     ...yearsOf(job.all).map((y) => new Option(`${y} 年标记`, y)),
   );
   $('yearFilter').value = f.year;
+  $('yearFilter').hidden = yearsOf(job.all).length === 0;
+  $('ratingFilter').hidden = !job.all.some((i) => i.my_rating);
   $('ratingFilter').value = f.rating;
   $('showFilter').value = f.show;
   $('queryFilter').value = f.query;
@@ -258,9 +360,10 @@ function itemRow(item) {
   const meta = document.createElement('span');
   meta.className = 'muted item-meta';
   meta.textContent = [
-    `${TYPE_ICONS[item.type]} ${TYPE_LABELS[item.type]}`,
+    item.typeGuess ? '🎬 影视' : `${TYPE_ICONS[item.type]} ${TYPE_LABELS[item.type]}`,
     item.status,
     stars(item.my_rating),
+    !item.my_rating && item.rating ? `豆瓣 ${item.rating}` : '',
     item.marked_date,
     item.author || item.director,
   ]
@@ -335,8 +438,12 @@ function showReview() {
   job.filters = { ...EMPTY_FILTERS, ...(job.filters || {}) };
 
   const existing = job.all.filter((i) => i.exists).length;
-  const lines = [`豆瓣上共读到 ${job.all.length} 条标记${existing ? `，其中 ${existing} 条已经在 Notion 里` : ''}。`];
+  const what = job.config.mode === 'page' ? '个条目' : '条标记';
+  const lines = [];
+  if (job.note) lines.push(job.note);
+  lines.push(`共读到 ${job.all.length} ${what}${existing ? `，其中 ${existing} 条已经在 Notion 里` : ''}。`);
   lines.push('默认勾选了所有还没导入的。勾选「已在 Notion」的条目，会用豆瓣的最新信息更新它。');
+  if (job.config.mode === 'page') lines.push(`导入后会在「来源」字段记上「${job.all[0]?.source}」。`);
   for (const t of job.noDedupe) {
     lines.push(`⚠ ${TYPE_LABELS[t]}数据库的「链接」字段不是网址类型，无法判断是否重复。`);
   }
@@ -509,14 +616,37 @@ function show(section) {
 }
 
 function fillForm(config) {
-  $('uid').value = config.uid;
+  setMode(config.mode || 'mine');
+  $('uid').value = config.uid || '';
   for (const kind of ['book', 'movie']) {
-    for (const box of document.querySelectorAll(`input[name="${kind}"]`)) box.checked = config.kinds[kind].includes(box.value);
+    for (const box of document.querySelectorAll(`input[name="${kind}"]`)) box.checked = (config.kinds?.[kind] || []).includes(box.value);
   }
   document.querySelector(`input[name="detail"][value="${config.detail ? 'full' : 'fast'}"]`).checked = true;
+  $('pageUrl').value = config.pageUrl || '';
+  if (config.maxPages !== undefined) $('maxPages').value = String(config.maxPages);
+}
+
+// 弹窗点了“批量导入这个页面”：切到列表模式，带上已经读到的第一页
+async function takePendingPage() {
+  const pending = (await chrome.storage.local.get(PENDING_KEY))[PENDING_KEY];
+  if (!pending || Date.now() - pending.at > 30 * 60 * 1000) return false;
+  preload = pending;
+  setMode('page');
+  $('pageUrl').value = pending.url;
+  $('preloadNote').textContent =
+    `已从页面「${pending.name}」读到 ${pending.items.length} 个条目` +
+    (pending.next ? `（共 ${pending.totalPages} 页）。` : '。') +
+    '选好要读几页，点「读取列表」。';
+  $('preloadNote').hidden = false;
+  if (!pending.next) $('maxPages').value = '1';
+  return true;
 }
 
 async function init() {
+  for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => setMode(tab.dataset.mode));
+  $('pageUrl').addEventListener('input', () => {
+    $('preloadNote').hidden = !preload || !samePage(preload.url, $('pageUrl').value.trim());
+  });
   $('scanBtn').addEventListener('click', scan);
   $('startBtn').addEventListener('click', startImport);
   $('selectVisible').addEventListener('click', () => setVisible(true));
@@ -565,7 +695,7 @@ async function init() {
   $('discardBtn').addEventListener('click', async () => {
     const config = job.config;
     await clearJob();
-    fillForm(config);
+    if (!preload) fillForm(config); // 从弹窗带过来的页面优先
     show('setup');
   });
 
@@ -575,6 +705,7 @@ async function init() {
   $('uid').addEventListener('change', () => chrome.storage.local.set({ lastImportUid: $('uid').value.trim() }));
 
   const stored = (await chrome.storage.local.get(JOB_KEY))[JOB_KEY];
+  const fromPopup = await takePendingPage();
   if (stored && stored.phase !== 'done') {
     job = stored;
     // 旧版本存下的任务没有完整列表：把待导入的条目当作全部，并全部勾上
@@ -582,13 +713,13 @@ async function init() {
       job.all = job.items.map((i) => ({ ...i, key: subjectKey(i.url), exists: false }));
       job.selected = job.all.map((i) => i.key);
     }
-    fillForm(job.config);
+    if (!fromPopup) fillForm(job.config);
     $('resumeText').textContent =
       job.phase === 'review'
         ? `上次读取了 ${job.all.length} 条标记，还没开始导入。`
         : `上次的导入还没完成：已处理 ${job.next} / ${job.items.length} 条。`;
     $('resume').hidden = false;
-  } else if (stored) {
+  } else if (stored && !fromPopup) {
     fillForm(stored.config);
   }
 }

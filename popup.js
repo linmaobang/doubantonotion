@@ -1,4 +1,5 @@
 import { scrapeDouban } from './scraper.js';
+import { collectSubjects } from './collector.js';
 import { TYPE_LABELS } from './config.js';
 
 const $ = (id) => document.getElementById(id);
@@ -126,7 +127,9 @@ async function init() {
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!/^https:\/\/(book|movie)\.douban\.com\/subject\/\d+/.test(tab?.url || '')) {
-    setMessage('请在豆瓣图书、电影或剧集的详情页打开我。');
+    // 不是单个条目：如果是豆瓣的列表页（豆列、标签、Top250……），提供批量导入
+    if (/^https:\/\/(www|book|movie)\.douban\.com\//.test(tab?.url || '')) return initListPage(tab);
+    setMessage('请在豆瓣的条目页或列表页（豆列、标签、Top250……）打开我。');
     return;
   }
 
@@ -151,6 +154,40 @@ async function init() {
   }
   show(els.sync);
   checkExisting();
+}
+
+// 列表页：读出页面上的条目，交给批量导入页
+async function initListPage(tab) {
+  setMessage('正在读取页面…');
+  let list;
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collectSubjects });
+    list = result;
+  } catch (err) {
+    setMessage(`读取页面失败：${err.message}`, 'error');
+    return;
+  }
+  if (!list?.items.length) {
+    setMessage('这个页面上没有找到图书或影视条目。请在条目页或列表页（豆列、标签、Top250……）打开我。');
+    return;
+  }
+  setMessage('');
+  $('listName').textContent = list.name || '豆瓣页面';
+  const books = list.items.filter((i) => i.type === 'book').length;
+  const screen = list.items.length - books;
+  const parts = [books && `图书 ${books}`, screen && `影视 ${screen}`].filter(Boolean).join('，');
+  $('listMeta').textContent = `这一页有 ${list.items.length} 个条目（${parts}）${list.next ? `，共 ${list.totalPages} 页` : ''}`;
+  if (list.hasLoadMore) {
+    $('listHint').textContent = '这个页面是滚动加载的，只会导入已经显示出来的条目。想要更多，先在页面上点「加载更多」，再打开我。';
+    show($('listHint'));
+  }
+  show($('listCard'));
+  show($('importPage'));
+  $('importPage').addEventListener('click', async () => {
+    await chrome.storage.local.set({ pendingPage: { ...list, at: Date.now() } });
+    await chrome.tabs.create({ url: chrome.runtime.getURL('import.html') });
+    window.close();
+  });
 }
 
 init();

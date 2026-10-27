@@ -7,7 +7,7 @@
 </head>
 <body class="options">
   <main>
-    <h1>批量导入豆瓣标记</h1>
+    <h1>批量导入</h1>
 
     <div id="resume" class="panel notice" hidden>
       <p id="resumeText"></p>
@@ -20,30 +20,62 @@
     <!-- 第一步：选择要导入的内容 -->
     <section id="setup" class="panel">
       <h2>1. 选择要导入的内容</h2>
-      <label class="field">
-        <span>豆瓣个人主页链接或用户 ID</span>
-        <input type="text" id="uid" placeholder="https://www.douban.com/people/你的ID/">
-      </label>
-      <p class="muted">在豆瓣点头像进入「我的豆瓣」，复制浏览器地址栏里的链接即可。只会导入公开的标记。</p>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab" data-mode="mine" aria-selected="true">我的豆瓣标记</button>
+        <button type="button" role="tab" class="tab" data-mode="page" aria-selected="false">豆瓣上的列表</button>
+      </div>
 
-      <fieldset class="checks">
-        <legend>📚 图书</legend>
-        <label><input type="checkbox" name="book" value="mark"> 想读</label>
-        <label><input type="checkbox" name="book" value="doing"> 在读</label>
-        <label><input type="checkbox" name="book" value="done" checked> 读过</label>
-      </fieldset>
-      <fieldset class="checks">
-        <legend>🎬 电影和剧集</legend>
-        <label><input type="checkbox" name="movie" value="mark"> 想看</label>
-        <label><input type="checkbox" name="movie" value="doing"> 在看</label>
-        <label><input type="checkbox" name="movie" value="done" checked> 看过</label>
-      </fieldset>
+      <div id="mineFields" class="mode-fields">
+        <label class="field">
+          <span>豆瓣个人主页链接或用户 ID</span>
+          <input type="text" id="uid" placeholder="https://www.douban.com/people/你的ID/">
+        </label>
+        <p class="muted">在豆瓣点头像进入「我的豆瓣」，复制浏览器地址栏里的链接即可。会连同你的状态、评分、短评一起导入；只能导入公开的标记。</p>
 
-      <fieldset class="checks column">
+        <fieldset class="checks">
+          <legend>📚 图书</legend>
+          <label><input type="checkbox" name="book" value="mark"> 想读</label>
+          <label><input type="checkbox" name="book" value="doing"> 在读</label>
+          <label><input type="checkbox" name="book" value="done" checked> 读过</label>
+        </fieldset>
+        <fieldset class="checks">
+          <legend>🎬 电影和剧集</legend>
+          <label><input type="checkbox" name="movie" value="mark"> 想看</label>
+          <label><input type="checkbox" name="movie" value="doing"> 在看</label>
+          <label><input type="checkbox" name="movie" value="done" checked> 看过</label>
+        </fieldset>
+      </div>
+
+      <div id="pageFields" class="mode-fields" hidden>
+        <label class="field">
+          <span>豆瓣列表页链接</span>
+          <input type="text" id="pageUrl" placeholder="豆列、图书标签、Top250、别人的读过/看过……">
+        </label>
+        <p class="muted">
+          例如 <code>www.douban.com/doulist/…</code>、<code>book.douban.com/tag/科幻</code>、<code>movie.douban.com/top250</code>。<br>
+          「选电影」「选剧集」这类往下滚动加载的页面：先在浏览器里打开，点几次「加载更多」，再点插件图标里的「批量导入这个页面」。
+        </p>
+        <p id="preloadNote" class="hint" hidden></p>
+        <label class="field narrow">
+          <span>最多读取</span>
+          <select id="maxPages">
+            <option value="1">1 页</option>
+            <option value="3">3 页</option>
+            <option value="5" selected>5 页</option>
+            <option value="10">10 页</option>
+            <option value="20">20 页</option>
+            <option value="0">全部</option>
+          </select>
+        </label>
+        <p class="muted">列表页通常每页 15~25 条，标签页可能有几百页。读完后还可以再挑选。</p>
+      </div>
+
+      <fieldset id="detailField" class="checks column">
         <legend>信息完整度</legend>
         <label><input type="radio" name="detail" value="full" checked> 完整：逐条打开详情页，补全 ISBN、译者、编剧、IMDb、影视简介等（每条约 4 秒）</label>
         <label><input type="radio" name="detail" value="fast"> 快速：只用列表里的信息（每条约 1 秒）</label>
       </fieldset>
+      <p id="pageDetailNote" class="muted" hidden>列表页上只有标题和评分，所以每条都会打开详情页补全信息（每条约 4~5 秒）。</p>
 
       <button type="button" id="scanBtn" class="primary">读取列表</button>
       <p id="scanStatus" class="row-status"></p>
