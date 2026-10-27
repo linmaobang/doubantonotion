@@ -10,9 +10,6 @@
   <header class="bar">
     <h1>豆瓣 → Notion</h1>
     <nav class="toolbar" aria-label="工具">
-      <button id="openImport" class="tool-btn" title="批量导入你的豆瓣标记，或者豆列、标签、Top250 等列表">
-        <span data-icon="import"></span><span>批量导入</span>
-      </button>
       <button id="pinPanel" class="tool-btn" title="固定到侧边栏：不挡页面，切换页面时自动跟着变" hidden>
         <span data-icon="panel-right-open"></span><span>侧边栏</span>
       </button>
@@ -96,6 +93,16 @@
       <p id="listHint" class="hint" hidden></p>
       <button id="importPage" class="primary">挑选并导入这个列表</button>
     </section>
+
+    <!-- 批量导入：和单本保存是两件事，单独做成一张入口卡片 -->
+    <button id="openImport" class="entry-card" type="button" hidden>
+      <span class="entry-icon"><span data-icon="library-big" data-size="18"></span></span>
+      <span class="entry-text">
+        <strong>批量导入</strong>
+        <span>导入我的标记、豆列、Top250</span>
+      </span>
+      <span class="entry-arrow"><span data-icon="chevron-right"></span></span>
+    </button>
   </main>
 
   <footer id="autoFooter" class="auto-footer" hidden>

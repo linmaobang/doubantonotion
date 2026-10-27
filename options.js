@@ -3,7 +3,7 @@ import { normalizeId } from './notion.js';
 import { DEFAULT_STATE, STATE_KEY, describeStatus } from './autosync.js';
 import { parseUserId } from './douban.js';
 import { openMappingDialog } from './mapping.js';
-import { icon } from './icons.js';
+import { hydrateIcons, icon } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const DB_KEYS = ['bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId'];
@@ -28,6 +28,24 @@ function readForm() {
 async function save() {
   await chrome.storage.local.set(readForm());
   $('saveStatus').textContent = `已自动保存 · ${new Date().toLocaleTimeString()}`;
+  $('saveStatus').className = 'muted small-text';
+}
+
+// “保存”按钮：立刻保存（不等自动保存的延迟）、再检查一遍，告诉用户可以关页面了
+async function saveNow() {
+  const btn = $('saveBtn');
+  btn.disabled = true;
+  clearTimeout(checkTimer);
+  if (document.activeElement?.id === 'autoUid') document.activeElement.blur(); // 让账号输入框的修改先提交
+  await save();
+  await check(false);
+  $('saveStatus').textContent = '✓ 已保存，可以放心关闭这个页面';
+  $('saveStatus').className = 'small-text success';
+  btn.replaceChildren(icon('check'), '已保存');
+  setTimeout(() => {
+    btn.replaceChildren(icon('save'), '保存');
+    btn.disabled = false;
+  }, 1800);
 }
 
 let checkTimer = null;
@@ -266,6 +284,8 @@ async function initOpenMode() {
 // ---------- 入口 ----------
 
 async function init() {
+  hydrateIcons();
+  $('saveBtn').addEventListener('click', saveNow);
   const stored = await chrome.storage.local.get(['notionToken', 'parentPageUrl', 'parentPageId', ...DB_KEYS]);
   $('notionToken').value = stored.notionToken || '';
   $('parentPage').value = stored.parentPageUrl || stored.parentPageId || '';

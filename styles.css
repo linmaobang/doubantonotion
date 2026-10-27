@@ -689,3 +689,51 @@ body.panel .auto-footer { position: sticky; bottom: 0; background: var(--bg); }
 a.with-icon, .chip-btn { gap: 6px; }
 a.with-icon { display: flex; align-items: center; justify-content: center; }
 .auto-footer .icon { color: var(--muted); }
+
+/* ---------- 批量导入入口卡片 ---------- */
+.entry-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+  text-align: left;
+  transition: background 0.15s, border-style 0.15s;
+}
+.entry-card:hover { border-style: solid; background: var(--hover); }
+.entry-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.entry-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.entry-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.entry-text strong { font-size: 13px; }
+.entry-text span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-arrow { color: var(--muted); }
+.entry-card:hover .entry-arrow { color: var(--accent); }
+
+/* ---------- 设置页底部保存栏 ---------- */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  margin: 0 -16px -48px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.05);
+}
+.save-bar .primary { width: auto; padding: 8px 24px; display: inline-flex; align-items: center; gap: 6px; }

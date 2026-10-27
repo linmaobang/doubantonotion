@@ -44,6 +44,8 @@ function link(text, href) {
 
 function showOnly(id) {
   for (const s of ['loading', 'empty', 'subject', 'list']) show($(s), s === id);
+  // 列表页的主按钮已经是“导入这个列表”，不再重复放批量导入的入口
+  show($('openImport'), id === 'subject' || id === 'empty');
 }
 
 function showEmpty(text) {

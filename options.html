@@ -131,7 +131,11 @@
       </details>
     </section>
 
-    <p id="saveStatus" class="muted small-text" aria-live="polite"></p>
+    <!-- 其实每次修改都已经自动保存了；这个按钮让人放心：点完就可以关掉页面 -->
+    <div class="save-bar">
+      <span id="saveStatus" class="muted small-text" aria-live="polite">修改会自动保存</span>
+      <button type="button" id="saveBtn" class="primary with-icon"><span data-icon="save"></span><span>保存</span></button>
+    </div>
   </main>
 
   <script src="options.js" type="module"></script>
