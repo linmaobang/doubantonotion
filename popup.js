@@ -2,6 +2,7 @@ import { scrapeDouban } from './scraper.js';
 import { collectSubjects } from './collector.js';
 import { STATUS_LABELS, TYPE_LABELS } from './config.js';
 import { STATE_KEY, describeStatus } from './autosync.js';
+import { hydrateIcons } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (el, visible = true) => {
@@ -477,6 +478,7 @@ function setupOnce() {
 }
 
 async function init() {
+  hydrateIcons();
   setupOnce();
   renderAutoFooter();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

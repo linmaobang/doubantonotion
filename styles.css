@@ -10,6 +10,8 @@
   --error: #c0392b;
   --warn: #9a6a00;
   --on-accent: #ffffff;
+  --hover: rgba(0, 0, 0, 0.06);
+  --accent-soft: rgba(47, 125, 79, 0.12);
   --radius: 8px;
   color-scheme: light dark;
 }
@@ -27,6 +29,8 @@
     --error: #ef7a6c;
     --warn: #e0b34a;
     --on-accent: #0f2418;
+    --hover: rgba(255, 255, 255, 0.08);
+    --accent-soft: rgba(79, 174, 118, 0.16);
   }
 }
 
@@ -650,3 +654,38 @@ body.panel .cover { width: 88px; height: 126px; }
 body.panel .auto-footer { position: sticky; bottom: 0; background: var(--bg); }
 .icon-btn[hidden] { display: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- 图标（Lucide）和顶栏工具按钮 ---------- */
+.icon { display: inline-flex; flex-shrink: 0; line-height: 0; }
+.icon svg { display: block; }
+
+.toolbar { display: flex; align-items: center; gap: 2px; }
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.tool-btn:hover { background: var(--hover); color: var(--text); }
+.tool-btn:active { background: var(--border); }
+.tool-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tool-btn.icon-only { width: 28px; padding: 0; justify-content: center; }
+/* “侧边栏”是这次最想让人看见的入口：用强调色 */
+#pinPanel { color: var(--accent); }
+#pinPanel:hover { background: var(--accent-soft); color: var(--accent); }
+
+.bar { gap: 8px; }
+.bar h1 { white-space: nowrap; }
+
+a.with-icon, .chip-btn { gap: 6px; }
+a.with-icon { display: flex; align-items: center; justify-content: center; }
+.auto-footer .icon { color: var(--muted); }

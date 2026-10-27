@@ -3,6 +3,7 @@ import { normalizeId } from './notion.js';
 import { DEFAULT_STATE, STATE_KEY, describeStatus } from './autosync.js';
 import { parseUserId } from './douban.js';
 import { openMappingDialog } from './mapping.js';
+import { icon } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const DB_KEYS = ['bookDatabaseId', 'movieDatabaseId', 'tvDatabaseId'];
@@ -57,7 +58,7 @@ function mapButton(type, databaseId) {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'chip-btn';
-  b.textContent = '⇄ 字段对应';
+  b.append(icon('arrow-left-right', 13), '字段对应');
   b.title = '调整这个数据库的每一列放豆瓣的哪项信息';
   b.addEventListener('click', async () => {
     if (await openMappingDialog({ databaseId, type })) check(false);

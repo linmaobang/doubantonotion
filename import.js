@@ -12,6 +12,7 @@ import {
 import { scrapeDouban } from './scraper.js';
 import { collectNotes, collectSubjects, parseNote, sourceLabel } from './collector.js';
 import { openMappingDialog } from './mapping.js';
+import { icon } from './icons.js';
 
 // ---------- 节奏控制 ----------
 // 实测约 1.5 秒一个详情页没有触发验证；这里取得更保守，并加随机抖动。
@@ -683,7 +684,7 @@ function targetRow(type) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'chip-btn';
-    b.textContent = '⇄ 字段对应';
+    b.append(icon('arrow-left-right', 13), '字段对应');
     b.title = '调整这个数据库的每一列放豆瓣的哪项信息';
     b.addEventListener('click', () => editMapping(type, dbId));
     note.append(' ', b);

@@ -10,12 +10,20 @@
 <body class="popup panel">
   <header class="bar">
     <h1>豆瓣 → Notion</h1>
-    <div class="bar-links">
-      <button id="openImport" class="text-btn">批量导入</button>
-      <button id="pinPanel" class="icon-btn" title="固定到侧边栏：不挡页面，切换页面时自动跟着变" aria-label="固定到侧边栏" hidden>📌</button>
-      <button id="refresh" class="icon-btn" title="重新读取当前页面" aria-label="重新读取当前页面" hidden>↻</button>
-      <button id="openOptions" class="icon-btn" title="设置" aria-label="设置">⚙</button>
-    </div>
+    <nav class="toolbar" aria-label="工具">
+      <button id="openImport" class="tool-btn" title="批量导入你的豆瓣标记，或者豆列、标签、Top250 等列表">
+        <span data-icon="import"></span><span>批量导入</span>
+      </button>
+      <button id="pinPanel" class="tool-btn" title="固定到侧边栏：不挡页面，切换页面时自动跟着变" hidden>
+        <span data-icon="panel-right-open"></span><span>侧边栏</span>
+      </button>
+      <button id="refresh" class="tool-btn" title="重新读取当前页面（比如在页面上“加载更多”之后）" hidden>
+        <span data-icon="refresh-cw"></span><span>重新读取</span>
+      </button>
+      <button id="openOptions" class="tool-btn icon-only" title="设置" aria-label="设置">
+        <span data-icon="settings"></span>
+      </button>
+    </nav>
   </header>
 
   <main>
@@ -74,7 +82,7 @@
       </div>
 
       <button id="sync" class="primary" hidden>保存到 Notion</button>
-      <a id="openNotion" class="primary as-button" target="_blank" rel="noopener" hidden>在 Notion 中打开 ↗</a>
+      <a id="openNotion" class="primary as-button with-icon" target="_blank" rel="noopener" hidden><span>在 Notion 中打开</span><span data-icon="external-link"></span></a>
       <p id="result" class="result" hidden></p>
     </section>
 
@@ -92,7 +100,7 @@
   </main>
 
   <footer id="autoFooter" class="auto-footer" hidden>
-    <span>🔄</span>
+    <span data-icon="refresh-cw" data-size="13"></span>
     <span id="autoText"></span>
     <button id="autoAction" class="text-btn" hidden></button>
   </footer>
