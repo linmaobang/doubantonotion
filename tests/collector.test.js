@@ -33,3 +33,13 @@ test('来源写进「来源」字段', () => {
   const { properties } = mapProperties({ type: 'book', title: '三体', source: '标签：科幻' }, props, 'book');
   assert.deepEqual(properties['来源'], { multi_select: [{ name: '标签：科幻' }] });
 });
+
+test('从列表页导入时，详情页上你自己的标记会带进来；我的标记列表里已有的不被覆盖', () => {
+  const page = { type: 'book', title: '三体', mark: 'done', status: '读过', my_rating: '5', marked_date: '2020-01-01' };
+  const fromDoulist = mergeDetail({ type: 'book', title: '三体', source: '豆列：x' }, page);
+  assert.equal(fromDoulist.status, '读过');
+  assert.equal(fromDoulist.my_rating, '5');
+  const fromMine = mergeDetail({ type: 'book', title: '三体', status: '在读', my_rating: '3' }, page);
+  assert.equal(fromMine.status, '在读');
+  assert.equal(fromMine.my_rating, '3');
+});

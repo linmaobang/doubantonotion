@@ -63,12 +63,30 @@ export function scrapeDouban(doc = document, href = location.href) {
   const shortName = doc.title.replace(/\s*\(豆瓣\)\s*$/, '').trim();
   const title = shortName || fullName;
 
+  // 登录后，条目页会显示你自己的标记，例如“我读过这本书 2021-03-02”和你打的星
+  const mine = (() => {
+    const box = $('#interest_sect_level');
+    const text = box ? box.textContent.replace(/\s+/g, ' ') : '';
+    const m = text.match(/我(想读|在读|读过|想看|在看|看过)/);
+    if (!m) return {};
+    const code = { 想读: 'mark', 想看: 'mark', 在读: 'doing', 在看: 'doing', 读过: 'done', 看过: 'done' }[m[1]];
+    const labels = isBook ? { mark: '想读', doing: '在读', done: '读过' } : { mark: '想看', doing: '在看', done: '看过' };
+    const stars = Number($('#n_rating')?.value) || 0;
+    return {
+      mark: code,
+      status: labels[code],
+      my_rating: stars >= 1 && stars <= 5 ? String(stars) : '',
+      marked_date: text.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '',
+    };
+  })();
+
   const base = {
     type: isBook ? 'book' : isTv ? 'tv' : 'movie',
     title,
     url,
     cover: $('#mainpic img')?.src || '',
     rating: $('strong.rating_num')?.textContent.trim() || '',
+    ...mine,
   };
 
   if (isBook) {

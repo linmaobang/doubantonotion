@@ -50,3 +50,26 @@ test('默认只勾选还没导入的；统计新增和更新', () => {
   sel.add('movie:26635329');
   assert.deepEqual(summarizeSelection(items, sel), { total: 3, toCreate: 2, toUpdate: 1 });
 });
+
+import { rangeBetween, sortItems } from '../selection.js';
+
+test('排序', () => {
+  const list = [
+    { key: 'a', title: '活着', rating: '9.4', my_rating: '3', marked_date: '2019-01-01' },
+    { key: 'b', title: '三体', rating: '8.9', my_rating: '5', marked_date: '2021-05-01' },
+    { key: 'c', title: '红楼梦', rating: '9.7', my_rating: '', marked_date: '' },
+  ];
+  const keys = (l) => l.map((i) => i.key).join('');
+  assert.equal(keys(sortItems(list, '')), 'abc');
+  assert.equal(keys(sortItems(list, 'marked')), 'bac');
+  assert.equal(keys(sortItems(list, 'mine')), 'bac');
+  assert.equal(keys(sortItems(list, 'douban')), 'cab');
+  assert.equal(keys(list), 'abc', '不改动原数组');
+});
+
+test('Shift 连选的范围', () => {
+  const list = ['a', 'b', 'c', 'd'].map((key) => ({ key }));
+  assert.deepEqual(rangeBetween(list, 'b', 'd').map((i) => i.key), ['b', 'c', 'd']);
+  assert.deepEqual(rangeBetween(list, 'd', 'b').map((i) => i.key), ['b', 'c', 'd']);
+  assert.deepEqual(rangeBetween(list, 'x', 'b'), []);
+});

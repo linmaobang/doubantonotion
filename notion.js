@@ -270,6 +270,10 @@ export class NotionClient {
     return blocks;
   }
 
+  me() {
+    return this.request('/users/me');
+  }
+
   getPage(id) {
     return this.request(`/pages/${id}`);
   }

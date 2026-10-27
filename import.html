@@ -7,13 +7,20 @@
 </head>
 <body class="options">
   <main>
-    <h1>批量导入</h1>
+    <header class="page-head">
+      <h1>批量导入</h1>
+      <ol id="steps" class="steps" aria-label="步骤">
+        <li data-step="setup">选择来源</li>
+        <li data-step="review">挑选条目</li>
+        <li data-step="progress">导入</li>
+      </ol>
+    </header>
 
     <div id="resume" class="panel notice" hidden>
       <p id="resumeText"></p>
       <div class="row-actions">
         <button type="button" id="resumeBtn" class="primary">继续导入</button>
-        <button type="button" id="discardBtn" class="secondary">放弃，重新开始</button>
+        <button type="button" id="discardBtn" class="secondary">放弃，开始新的导入</button>
       </div>
     </div>
 
@@ -27,10 +34,13 @@
 
       <div id="mineFields" class="mode-fields">
         <label class="field">
-          <span>豆瓣个人主页链接或用户 ID</span>
-          <input type="text" id="uid" placeholder="https://www.douban.com/people/你的ID/">
+          <span>豆瓣账号</span>
+          <div class="input-row">
+            <input type="text" id="uid" placeholder="个人主页链接或用户 ID，例如 https://www.douban.com/people/你的ID/">
+            <button type="button" id="useMe" class="secondary">用当前登录的账号</button>
+          </div>
         </label>
-        <p class="muted">在豆瓣点头像进入「我的豆瓣」，复制浏览器地址栏里的链接即可。会连同你的状态、评分、短评一起导入；只能导入公开的标记。</p>
+        <p id="meHint" class="muted small-text">会连同你的状态、评分、短评一起导入；只能导入公开的标记。</p>
 
         <fieldset class="checks">
           <legend>📚 图书</legend>
@@ -87,8 +97,10 @@
       <ul id="summary" class="summary"></ul>
 
       <div class="filters">
-        <div id="typeFilter" class="chips" aria-label="类型"></div>
-        <div id="markFilter" class="chips" aria-label="状态"></div>
+        <div class="chips-row">
+          <div id="typeFilter" class="chips" aria-label="类型"></div>
+          <div id="markFilter" class="chips" aria-label="状态"></div>
+        </div>
         <div class="filter-row">
           <select id="yearFilter" aria-label="标记年份"><option value="">全部年份</option></select>
           <select id="ratingFilter" aria-label="我的评分">
@@ -105,12 +117,20 @@
             <option value="new">未导入</option>
             <option value="existing">已在 Notion</option>
           </select>
+          <select id="sortBy" aria-label="排序">
+            <option value="">默认顺序</option>
+            <option value="marked">标记时间：新→旧</option>
+            <option value="mine">我的评分：高→低</option>
+            <option value="douban">豆瓣评分：高→低</option>
+            <option value="title">标题</option>
+          </select>
           <input type="search" id="queryFilter" placeholder="搜标题、作者、导演">
         </div>
       </div>
 
       <div class="list-bar">
         <span id="visibleCount" class="muted"></span>
+        <span class="muted small-text">按住 Shift 点击可以连选</span>
         <span class="list-actions">
           <button type="button" id="selectVisible" class="text-btn">全选这些</button>
           <button type="button" id="clearVisible" class="text-btn">取消这些</button>
@@ -130,10 +150,20 @@
 
     <!-- 第三步：进度 -->
     <section id="progress" class="panel" hidden>
-      <h2>3. 导入中</h2>
-      <p class="muted">请保持这个页面打开。可以切到其他标签页；关掉也没关系，下次打开会接着导。</p>
+      <h2 id="progressTitle">3. 导入中</h2>
+      <p id="progressHint" class="muted">可以切到别的标签页，进度会显示在这个标签页的标题上。关掉也没关系，下次打开会接着导。</p>
       <div class="bar-track"><div id="bar" class="bar-fill"></div></div>
-      <p id="counts" class="counts"></p>
+      <div class="stats">
+        <div><b id="statDone">0</b><span>已处理</span></div>
+        <div><b id="statCreated">0</b><span>新增</span></div>
+        <div><b id="statUpdated">0</b><span>更新</span></div>
+        <div class="fail"><b id="statFailed">0</b><span>失败</span></div>
+        <div><b id="statLeft">—</b><span>预计剩余</span></div>
+      </div>
+      <div id="doneBox" class="done-box" hidden>
+        <p id="doneText"></p>
+        <div id="dbLinks" class="db-links"></div>
+      </div>
       <p id="current" class="muted"></p>
       <div id="blocked" class="notice warn-box" hidden>
         <p id="blockedText"></p>

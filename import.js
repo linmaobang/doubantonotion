@@ -1,6 +1,14 @@
 import { TYPE_ICONS, TYPE_LABELS, STATUS_LABELS } from './config.js';
 import { infoFromInterest, mergeDetail, parseUserId, subjectKey } from './douban.js';
-import { EMPTY_FILTERS, defaultSelection, filterItems, summarizeSelection, yearsOf } from './selection.js';
+import {
+  EMPTY_FILTERS,
+  defaultSelection,
+  filterItems,
+  rangeBetween,
+  sortItems,
+  summarizeSelection,
+  yearsOf,
+} from './selection.js';
 import { scrapeDouban } from './scraper.js';
 import { collectSubjects, sourceLabel } from './collector.js';
 
@@ -335,6 +343,10 @@ function buildFilters() {
   $('ratingFilter').value = f.rating;
   $('showFilter').value = f.show;
   $('queryFilter').value = f.query;
+  $('sortBy').value = f.sort || '';
+  // 从列表页导入的条目没有“我的”标记，这两种排序没意义
+  const hasMine = job.all.some((i) => i.marked_date);
+  for (const v of ['marked', 'mine']) $('sortBy').querySelector(`option[value="${v}"]`).hidden = !hasMine;
 }
 
 function stars(n) {
@@ -348,6 +360,14 @@ function itemRow(item) {
   box.type = 'checkbox';
   box.checked = selected.has(item.key);
   box.dataset.key = item.key;
+
+  const thumb = document.createElement('img');
+  thumb.className = 'thumb';
+  thumb.alt = '';
+  thumb.loading = 'lazy';
+  thumb.onerror = () => thumb.classList.add('broken');
+  if (item.cover) thumb.src = thumbUrl(item.cover);
+  else thumb.classList.add('broken');
 
   const body = document.createElement('span');
   body.className = 'item-body';
@@ -371,7 +391,7 @@ function itemRow(item) {
     .join(' · ');
   body.append(title, meta);
 
-  label.append(box, body);
+  label.append(box, thumb, body);
   if (item.exists) {
     const badge = document.createElement('span');
     badge.className = 'badge';
@@ -383,12 +403,21 @@ function itemRow(item) {
   return row;
 }
 
+// 列表里用小图就够了
+function thumbUrl(url) {
+  return url.replace(/\/[lm]_ratio_poster\//, '/s_ratio_poster/').replace(/\/subject\/[lm]\//, '/subject/s/');
+}
+
+let shownOrder = []; // 当前列表的显示顺序，Shift 连选用
+let lastClicked = null;
+
 function visibleItems() {
   return filterItems(job.all, job.filters);
 }
 
 function renderList() {
-  const items = visibleItems();
+  const items = sortItems(visibleItems(), job.filters.sort);
+  shownOrder = items;
   const frag = document.createDocumentFragment();
   for (const item of items) frag.append(itemRow(item));
   $('itemList').replaceChildren(frag);
@@ -475,12 +504,23 @@ function log(text, kind = '') {
 
 function renderProgress() {
   const { next, items, stats } = job;
+  const done = next >= items.length;
   $('bar').style.width = `${items.length ? (next / items.length) * 100 : 100}%`;
-  const parts = [`${next} / ${items.length}`, `新增 ${stats.created}`];
-  if (stats.updated) parts.push(`更新 ${stats.updated}`);
-  if (stats.failed) parts.push(`失败 ${stats.failed}`);
-  if (next < items.length) parts.push(`剩余${minutes(items.length - next)}`);
-  $('counts').textContent = parts.join(' · ');
+  $('statDone').textContent = `${next} / ${items.length}`;
+  $('statCreated').textContent = stats.created;
+  $('statUpdated').textContent = stats.updated;
+  $('statFailed').textContent = stats.failed;
+  $('statLeft').textContent = done ? '—' : minutes(items.length - next).replace('约 ', '');
+
+  // 切到别的标签页时，从标签页标题就能看到进度
+  $('progressTitle').textContent = running ? '3. 导入中' : done ? '3. 导入完成' : '3. 已暂停';
+  document.title = running
+    ? `(${next}/${items.length}) 导入中 · 豆瓣同步到 Notion`
+    : done
+      ? '✓ 导入完成 · 豆瓣同步到 Notion'
+      : '已暂停 · 豆瓣同步到 Notion';
+  $('progressHint').hidden = done;
+  renderDone(done);
 
   $('failBox').hidden = job.failures.length === 0;
   $('failSummary').textContent = `失败的条目（${job.failures.length}）`;
@@ -497,7 +537,6 @@ function renderProgress() {
     }),
   );
 
-  const done = next >= items.length;
   $('pauseBtn').hidden = !running;
   $('continueBtn').hidden = running || done;
   $('retryBtn').hidden = running || !done || job.failures.length === 0;
@@ -517,6 +556,28 @@ async function collectInfo(item) {
     if (err.code === 'DOUBAN_NOT_FOUND') return item; // 详情页没了，用列表里的信息
     throw err;
   }
+}
+
+// 完成后：一句话总结 + 直接打开用到的 Notion 数据库
+function renderDone(done) {
+  $('doneBox').hidden = !done;
+  if (!done) return;
+  const { created, updated, failed } = job.stats;
+  const parts = [`新增 ${created} 条`];
+  if (updated) parts.push(`更新 ${updated} 条`);
+  if (failed) parts.push(`${failed} 条失败，可以点下面的按钮重试`);
+  $('doneText').textContent = `✓ 全部处理完了：${parts.join('，')}。`;
+  $('dbLinks').replaceChildren(
+    ...Object.entries(job.dbLinks || {}).map(([title, url]) => {
+      const a = document.createElement('a');
+      a.className = 'secondary as-button';
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `打开「${title}」↗`;
+      return a;
+    }),
+  );
 }
 
 async function run() {
@@ -541,6 +602,7 @@ async function run() {
       noResponseTimes = 0;
       if (r.updated) job.stats.updated++;
       else job.stats.created++;
+      if (r.dbUrl) job.dbLinks = { ...(job.dbLinks || {}), [r.dbTitle]: r.dbUrl };
       log(`${r.updated ? '已更新' : '已新增'}：${item.title}`, 'success');
     } catch (err) {
       if (err.code === 'DOUBAN_CHALLENGE') {
@@ -592,10 +654,7 @@ async function run() {
   running = false;
   job.phase = job.next >= job.items.length ? 'done' : 'paused';
   await saveJob();
-  $('current').textContent =
-    job.phase === 'done'
-      ? `完成：新增 ${job.stats.created} 条，更新 ${job.stats.updated} 条，失败 ${job.stats.failed} 条。`
-      : '已暂停。';
+  $('current').textContent = job.phase === 'done' ? '' : '已暂停。点「继续」接着导。';
   renderProgress();
 }
 
@@ -610,9 +669,30 @@ async function retryFailures() {
 
 // ---------- 页面切换 ----------
 
+const STEPS = ['setup', 'review', 'progress'];
+
+function markStep(section) {
+  const cur = STEPS.indexOf(section);
+  for (const el of document.querySelectorAll('#steps li')) {
+    const i = STEPS.indexOf(el.dataset.step);
+    el.className = cur < 0 ? '' : i < cur ? 'done' : i === cur ? 'current' : '';
+    if (i === cur) el.setAttribute('aria-current', 'step');
+    else el.removeAttribute('aria-current');
+  }
+}
+
 function show(section) {
-  for (const id of ['setup', 'review', 'progress']) $(id).hidden = id !== section;
+  for (const id of STEPS) $(id).hidden = id !== section;
   $('resume').hidden = true;
+  markStep(section);
+  if (section !== 'progress') document.title = '批量导入 · 豆瓣同步到 Notion';
+}
+
+// 有没做完的导入时，只显示“继续”卡片，不把表单也摆出来
+function showResume() {
+  for (const id of STEPS) $(id).hidden = true;
+  $('resume').hidden = false;
+  markStep(null);
 }
 
 function fillForm(config) {
@@ -642,6 +722,26 @@ async function takePendingPage() {
   return true;
 }
 
+// 识别当前登录的豆瓣账号，省得用户自己找主页链接
+async function detectMe(byUser) {
+  $('useMe').disabled = true;
+  if (byUser) $('meHint').textContent = '正在识别…';
+  try {
+    const { uid, name } = await bg('doubanMe');
+    if (uid) {
+      $('uid').value = uid;
+      chrome.storage.local.set({ lastImportUid: uid });
+      $('meHint').textContent = `✓ 已识别当前登录的豆瓣账号${name ? `「${name}」` : ''}。会连同你的状态、评分、短评一起导入。`;
+    } else if (byUser) {
+      $('meHint').textContent = '没有检测到登录的豆瓣账号。请先在浏览器里登录豆瓣，或者直接粘贴个人主页链接。';
+    }
+  } catch (err) {
+    if (byUser) $('meHint').textContent = `识别失败：${err.message}`;
+  } finally {
+    $('useMe').disabled = false;
+  }
+}
+
 async function init() {
   for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => setMode(tab.dataset.mode));
   $('pageUrl').addEventListener('input', () => {
@@ -651,6 +751,30 @@ async function init() {
   $('startBtn').addEventListener('click', startImport);
   $('selectVisible').addEventListener('click', () => setVisible(true));
   $('clearVisible').addEventListener('click', () => setVisible(false));
+  // Shift + 点击：把上次点的和这次点的之间全部设成同样的勾选状态
+  $('itemList').addEventListener('click', (e) => {
+    const box = e.target.closest('input[type=checkbox]');
+    if (!box) return;
+    const key = box.dataset.key;
+    if (e.shiftKey && lastClicked && lastClicked !== key) {
+      const keys = new Set(rangeBetween(shownOrder, lastClicked, key).map((i) => i.key));
+      for (const k of keys) {
+        if (box.checked) selected.add(k);
+        else selected.delete(k);
+      }
+      for (const other of $('itemList').querySelectorAll('input[type=checkbox]')) {
+        if (keys.has(other.dataset.key)) other.checked = box.checked;
+      }
+      renderSelection();
+      saveSelectionSoon();
+    }
+    lastClicked = key;
+  });
+  $('sortBy').addEventListener('change', () => {
+    job.filters.sort = $('sortBy').value;
+    renderList();
+    saveSelectionSoon();
+  });
   $('itemList').addEventListener('change', (e) => {
     const key = e.target.dataset?.key;
     if (!key) return;
@@ -699,11 +823,15 @@ async function init() {
     show('setup');
   });
 
+  $('useMe').addEventListener('click', () => detectMe(true));
+
   // 记住上次填的用户 ID
   const { lastImportUid } = await chrome.storage.local.get('lastImportUid');
   if (lastImportUid) $('uid').value = lastImportUid;
+  else detectMe(false); // 没填过就自动识别一次
   $('uid').addEventListener('change', () => chrome.storage.local.set({ lastImportUid: $('uid').value.trim() }));
 
+  markStep('setup');
   const stored = (await chrome.storage.local.get(JOB_KEY))[JOB_KEY];
   const fromPopup = await takePendingPage();
   if (stored && stored.phase !== 'done') {
@@ -718,7 +846,7 @@ async function init() {
       job.phase === 'review'
         ? `上次读取了 ${job.all.length} 条标记，还没开始导入。`
         : `上次的导入还没完成：已处理 ${job.next} / ${job.items.length} 条。`;
-    $('resume').hidden = false;
+    showResume();
   } else if (stored && !fromPopup) {
     fillForm(stored.config);
   }

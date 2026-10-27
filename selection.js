@@ -7,6 +7,7 @@ export const EMPTY_FILTERS = {
   rating: '', // '' 全部，'1'~'5'，'none' 未评分
   query: '',
   show: 'all', // all / new / existing
+  sort: '', // 见 sortItems
 };
 
 export function markYear(item) {
@@ -53,4 +54,31 @@ export function summarizeSelection(items, selected) {
     else toCreate++;
   }
   return { total: toCreate + toUpdate, toCreate, toUpdate };
+}
+
+// 排序：'' 保持原顺序（豆瓣列表的顺序）
+export function sortItems(items, sort) {
+  const list = [...items];
+  const num = (v) => Number(v) || 0;
+  switch (sort) {
+    case 'marked':
+      return list.sort((a, b) => (b.marked_date || '').localeCompare(a.marked_date || ''));
+    case 'mine':
+      return list.sort((a, b) => num(b.my_rating) - num(a.my_rating));
+    case 'douban':
+      return list.sort((a, b) => num(b.rating) - num(a.rating));
+    case 'title':
+      return list.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'zh-Hans-CN'));
+    default:
+      return list;
+  }
+}
+
+// Shift 连选：返回从上次点击到这次点击之间（含两端）的条目
+export function rangeBetween(items, fromKey, toKey) {
+  const a = items.findIndex((i) => i.key === fromKey);
+  const b = items.findIndex((i) => i.key === toKey);
+  if (a < 0 || b < 0) return [];
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  return items.slice(lo, hi + 1);
 }

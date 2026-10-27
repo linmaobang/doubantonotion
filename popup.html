@@ -15,40 +15,72 @@
   </header>
 
   <main>
-    <div id="message" class="message" hidden></div>
+    <!-- 读取中 -->
+    <div id="loading" class="skeleton" aria-label="正在读取页面">
+      <div class="sk-cover"></div>
+      <div class="sk-lines"><div></div><div></div><div></div></div>
+    </div>
 
-    <section id="card" class="card" hidden>
-      <img id="cover" class="cover" alt="">
-      <div class="card-body">
-        <h2 id="title"></h2>
-        <p id="subtitle" class="muted"></p>
-        <p id="meta" class="meta"></p>
-        <label class="type-row">
-          <span>保存为</span>
-          <select id="itemType">
-            <option value="book">图书</option>
-            <option value="movie">电影</option>
-            <option value="tv">剧集</option>
-          </select>
-        </label>
+    <!-- 空状态：不是豆瓣页面 / 页面里没有条目 / 出错 -->
+    <section id="empty" class="empty" hidden>
+      <p id="emptyText"></p>
+      <div class="empty-links">
+        <a class="secondary as-button" href="https://book.douban.com/" target="_blank" rel="noopener">📚 豆瓣读书</a>
+        <a class="secondary as-button" href="https://movie.douban.com/" target="_blank" rel="noopener">🎬 豆瓣电影</a>
       </div>
     </section>
 
-    <p id="existing" class="hint" hidden></p>
-
-    <button id="sync" class="primary" hidden>保存到 Notion</button>
-    <button id="goSettings" class="primary" hidden>打开设置</button>
-
-    <p id="result" class="result" hidden></p>
-
-    <section id="listCard" class="card list-card" hidden>
-      <div class="card-body">
-        <h2 id="listName"></h2>
-        <p id="listMeta" class="muted"></p>
-        <p id="listHint" class="hint" hidden></p>
+    <!-- 单个条目 -->
+    <section id="subject" class="stack" hidden>
+      <div class="card">
+        <img id="cover" class="cover" alt="">
+        <div class="card-body">
+          <h2 id="title"></h2>
+          <p id="subtitle" class="muted"></p>
+          <p id="meta" class="meta"></p>
+          <div id="typeSwitch" class="segmented small" role="radiogroup" aria-label="保存为" hidden>
+            <button type="button" role="radio" data-type="movie">电影</button>
+            <button type="button" role="radio" data-type="tv">剧集</button>
+          </div>
+        </div>
       </div>
+
+      <div class="mine">
+        <div class="mine-row">
+          <span class="mine-label">我的标记</span>
+          <div id="statusSwitch" class="segmented" role="radiogroup" aria-label="我的标记"></div>
+        </div>
+        <div id="ratingRow" class="mine-row" hidden>
+          <span class="mine-label">我的评分</span>
+          <div id="stars" class="stars" role="radiogroup" aria-label="我的评分"></div>
+        </div>
+        <p id="markedFrom" class="muted small-text" hidden></p>
+      </div>
+
+      <p id="existing" class="hint" hidden></p>
+
+      <div id="setupNeeded" class="setup-box" hidden>
+        <strong>还差一步：连接 Notion</strong>
+        <p class="muted">填一个 Notion Token，再选一个 Notion 页面，插件会自动建好数据库。</p>
+        <button id="goSettings" class="primary">去设置</button>
+      </div>
+
+      <button id="sync" class="primary" hidden>保存到 Notion</button>
+      <a id="openNotion" class="primary as-button" target="_blank" rel="noopener" hidden>在 Notion 中打开 ↗</a>
+      <p id="result" class="result" hidden></p>
     </section>
-    <button id="importPage" class="primary" hidden>批量导入这个页面</button>
+
+    <!-- 列表页 -->
+    <section id="list" class="stack" hidden>
+      <div class="card list-card">
+        <div class="card-body">
+          <h2 id="listName"></h2>
+          <p id="listMeta" class="muted"></p>
+        </div>
+      </div>
+      <p id="listHint" class="hint" hidden></p>
+      <button id="importPage" class="primary">挑选并导入这个列表</button>
+    </section>
   </main>
 
   <script src="popup.js" type="module"></script>

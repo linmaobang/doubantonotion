@@ -18,6 +18,8 @@ import {
 const REFERER_RULES = [
   { id: 1, domain: 'doubanio.com', referer: 'https://www.douban.com/' },
   { id: 2, domain: 'm.douban.com', referer: 'https://m.douban.com/mine/' },
+  // 导入页、设置页这类插件自己的标签页（它们有 tabId，上面两条管不到），用来显示封面缩略图
+  { id: 3, domain: 'doubanio.com', referer: 'https://www.douban.com/', fromExtensionPages: true },
 ];
 
 async function ensureRefererRule() {
@@ -30,7 +32,9 @@ async function ensureRefererRule() {
         type: 'modifyHeaders',
         requestHeaders: [{ header: 'Referer', operation: 'set', value: r.referer }],
       },
-      condition: { requestDomains: [r.domain], tabIds: [-1] },
+      condition: r.fromExtensionPages
+        ? { requestDomains: [r.domain], initiatorDomains: [chrome.runtime.id] }
+        : { requestDomains: [r.domain], tabIds: [-1] },
     })),
   });
 }
@@ -196,50 +200,62 @@ async function sync({ info }) {
     matched,
     coverUploaded: !!coverUploadId,
     dbTitle: databaseTitle(db),
+    dbUrl: db.url,
     dbCreated: target.how === 'created',
     fieldsAdded: target.added || [],
   };
 }
 
-async function verify({ token, databaseId, type }) {
-  const client = new NotionClient(token);
-  const db = await client.getDatabase(normalizeId(databaseId));
-  const mapping = MAPPINGS[type];
-  const matched = Object.keys(mapping)
-    .map((key) => findField(key, db.properties, mapping))
-    .filter(Boolean);
-  return { title: databaseTitle(db), matched: [...new Set(matched)] };
+function pageTitle(page) {
+  const prop = Object.values(page.properties || {}).find((p) => p.type === 'title');
+  return (prop?.title || []).map((t) => t.plain_text).join('') || '未命名页面';
 }
 
-// 设置页的“检查”：确认页面能访问，并说明每个类型会用哪个数据库。
-// apply = true 时立即建库/补字段。
+// 设置页的“检查连接”：逐项检查，每项单独给出结果，方便设置页逐行显示。
+// apply = true 时顺便建库 / 补字段。
 async function preparePage({ apply = false }) {
   const settings = await getSettings();
-  if (!settings.notionToken) throw new Error('先填写 Notion Token。');
+  const out = { token: null, page: null, types: null };
+  if (!settings.notionToken) return out;
+
+  const client = new NotionClient(settings.notionToken);
+  try {
+    const me = await client.me();
+    out.token = { ok: true, workspace: me.bot?.workspace_name || '' };
+  } catch (err) {
+    out.token = { ok: false, error: friendlyError(err) };
+    return out;
+  }
+
   const pageId = normalizeId(settings.parentPageId);
   if (pageId) {
-    const client = new NotionClient(settings.notionToken);
     try {
-      await client.getPage(pageId);
+      out.page = { ok: true, title: pageTitle(await client.getPage(pageId)) };
     } catch (err) {
       // 用户可能贴的是数据库链接
       const isDb = await client.getDatabase(pageId).then(() => true, () => false);
-      if (isDb) {
-        throw new Error('这是一个数据库的链接，不是页面。请填数据库所在的页面，或者在下面「已有数据库」里指定它。');
-      }
-      throw err;
+      out.page = {
+        ok: false,
+        error: isDb
+          ? '这是一个数据库的链接，不是页面。请填数据库所在的页面，或者在下面「已有数据库」里指定它。'
+          : friendlyError(err),
+      };
+      return out;
     }
   }
-  const result = {};
+
+  const hasDb = settings.bookDatabaseId || settings.movieDatabaseId || settings.tvDatabaseId;
+  if (!pageId && !hasDb) return out;
+  out.types = {};
   for (const type of ['book', 'movie', 'tv']) {
     try {
       const r = await getTarget(type, { create: apply });
-      result[type] = { how: r.how, dbTitle: r.dbTitle, missing: r.missing || [], added: r.added || [] };
+      out.types[type] = { how: r.how, dbTitle: r.dbTitle, missing: r.missing || [], added: r.added || [] };
     } catch (err) {
-      result[type] = { error: friendlyError(err) };
+      out.types[type] = { error: friendlyError(err) };
     }
   }
-  return result;
+  return out;
 }
 
 // ---------- 批量导入用到的操作 ----------
@@ -281,6 +297,16 @@ async function doubanPage({ url }) {
   return { html, url: res.url };
 }
 
+// 当前登录的豆瓣账号：douban.com/mine/ 会跳到自己的主页；没登录会跳到登录页
+async function doubanMe() {
+  const res = await fetch('https://www.douban.com/mine/', { credentials: 'include' });
+  const m = res.url.match(/douban\.com\/people\/([^/?#]+)/);
+  if (!m) return { uid: null };
+  const html = await res.text();
+  const name = html.match(/<title>\s*([^<]+?)\s*<\/title>/)?.[1] || '';
+  return { uid: decodeURIComponent(m[1]), name };
+}
+
 // 任意豆瓣列表页的 HTML（豆列、标签、Top250……），交给导入页解析。只允许豆瓣自己的域名。
 async function doubanHtml({ url }) {
   if (!/^https:\/\/(www|book|movie)\.douban\.com\//.test(url)) {
@@ -319,11 +345,11 @@ const HANDLERS = {
   sleep,
   checkExisting,
   sync,
-  verify,
   preparePage,
   doubanInterests,
   doubanPage,
   doubanHtml,
+  doubanMe,
   listExisting,
 };
 
